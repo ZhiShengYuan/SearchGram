@@ -36,12 +36,11 @@ def private_use(func):
     def wrapper(client: "Client", message: "types.Message"):
         chat_id = getattr(message.chat, "id", None)
         if chat_id != int(OWNER_ID):
-            logging.warning("Unauthorized user: %s", chat_id)
+            logging.warning("Unauthorized user or not in a group: %s", chat_id)
             return
         return func(client, message)
 
     return wrapper
-
 
 @app.on_message(filters.command(["start"]))
 def search_handler(client: "Client", message: "types.Message"):
@@ -207,14 +206,9 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
         new_page = page - 1
     else:
         raise ValueError("Invalid direction")
-
-    # find original user query
-    # /private hello
-    # -t=private -u=123 hello
-    # -t=private hello
-    # hello
     user_query = message.reply_to_message.text
-
+    if user_query.startswith("/search"):
+        user_query = user_query.replace("/search", "/group")
     parts = user_query.split(maxsplit=2)
     if user_query.startswith("/"):
         user_filter = f"-u={parts[1]}" if len(parts) > 2 else ""
