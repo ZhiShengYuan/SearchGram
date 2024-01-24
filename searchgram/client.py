@@ -32,6 +32,8 @@ r = fakeredis.FakeStrictRedis()
 def message_handler(client: "Client", message: "types.Message"):
     if(message.from_user.id == 6543925426):
         print("self bot message,ignored")
+    elif(message.text.startswith("/search")):
+        print("search command,ignore")
     else:
         logging.info("Adding new message: %s-%s", message.chat.id, message.id)
         tgdb.upsert(message)
