@@ -30,8 +30,11 @@ r = fakeredis.FakeStrictRedis()
 
 @app.on_message((filters.outgoing | filters.incoming) & ~filters.chat(BOT_ID))
 def message_handler(client: "Client", message: "types.Message"):
-    logging.info("Adding new message: %s-%s", message.chat.id, message.id)
-    tgdb.upsert(message)
+    if(message.get("message", {}).get("from_user", {}).get("id") == 6543925426):
+        print("self bot message,ignored")
+    else:
+        logging.info("Adding new message: %s-%s", message.chat.id, message.id)
+        tgdb.upsert(message)
 
 
 @app.on_edited_message(~filters.chat(BOT_ID))

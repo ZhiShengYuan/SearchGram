@@ -52,14 +52,7 @@ def search_handler(client: "Client", message: "types.Message"):
 def help_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     help_text = f"""
-SearchGram Search syntax Help:
-1. **global search**: send any message to the bot \n
-2. **chat type search**: `-t=GROUP keyword`, support types are {chat_types}\n
-3. **chat user search**: `-u=user_id|username keyword`\n
-4. **exact match**: `-m=e keyword` or directly add double-quotes `"keyword"`\n
-5. combine of above: `-t=GROUP -u=user_id|username keyword`\n
-6. `/private [username] keyword`: search in private chat with username, if username is omitted, search in all private chats. 
-This also applies to all above search types.\n
+usage: /search search the message from TUNA
     """
     message.reply_text(help_text, quote=True)
 
@@ -167,13 +160,11 @@ def type_search_handler(client: "Client", message: "types.Message"):
         message.reply_text(f"/{chat_type} [username] keyword", quote=True, parse_mode=enums.ParseMode.MARKDOWN)
         return
     if len(parts) > 2:
-        user_filter = f"-u={parts[1]}"
         keyword = parts[2]
     else:
-        user_filter = ""
         keyword = parts[1]
 
-    refined_text = f"-t={chat_type} {user_filter} {keyword}"
+    refined_text = f"-t=group {keyword}"
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     text, markup = parse_and_search(refined_text)
     message.reply_text(text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
@@ -184,7 +175,7 @@ def type_search_handler(client: "Client", message: "types.Message"):
 def search_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     text, markup = parse_and_search(message.text)
-    if len(text) > 4096:
+    if len(text) > 3072:
         logging.warning("Message too long, sending as file instead")
         file = BytesIO(text.encode())
         file.name = "search_result.txt"
@@ -208,16 +199,9 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
         raise ValueError("Invalid direction")
     user_query = message.reply_to_message.text
     if user_query.startswith("/search"):
-        user_query = user_query.replace("/search", "/group")
-    parts = user_query.split(maxsplit=2)
-    if user_query.startswith("/"):
-        user_filter = f"-u={parts[1]}" if len(parts) > 2 else ""
-        keyword = parts[2] if len(parts) > 2 else parts[1]
-        refined_text = f"-t={parts[0][1:].upper()} {user_filter} {keyword}"
-    elif len(parts) == 1:
-        refined_text = parts[0]
-    else:
-        refined_text = user_query
+        parts = user_query.split(maxsplit=2)
+        refined_text = parts[1]
+        
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     new_text, new_markup = parse_and_search(refined_text, new_page)
     message.edit_text(new_text, reply_markup=new_markup)
