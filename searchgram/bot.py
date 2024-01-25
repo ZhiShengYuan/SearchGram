@@ -164,7 +164,8 @@ def type_search_handler(client: "Client", message: "types.Message"):
     else:
         keyword = parts[1]
 
-    refined_text = f"-t=group {keyword}"
+    refined_text = f"-t=group {keyword} -t=user {message.chat.id}"
+
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     text, markup = parse_and_search(refined_text)
     message.reply_text(text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
