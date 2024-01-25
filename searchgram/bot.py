@@ -35,7 +35,7 @@ parser.add_argument("-m", "--mode", help="match mode, e: exact match, other valu
 def private_use(func):
     def wrapper(client: "Client", message: "types.Message"):
         chat_id = getattr(message.chat, "id", None)
-        if chat_id != int(OWNER_ID):
+        if str(chat_id) not in str(OWNER_ID):
             logging.warning("Unauthorized user or not in a group: %s", chat_id)
             return
         return func(client, message)
