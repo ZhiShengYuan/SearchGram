@@ -30,15 +30,34 @@ class BasicSearchEngine:
 
     @staticmethod
     def check_ignore(message):
-        whitelist, blacklist = BasicSearchEngine().get_config_list()
-        uid = str(message.chat.id)
-        chat_type = message.chat.type.name  # upper case
-        username = getattr(message.chat, "username", None)
-        if whitelist and not (uid in whitelist or username in whitelist or f"`{chat_type}`" in whitelist):
+        whitelist, blacklist = BasicSearchEngine.get_config_list()
+
+        # Check if the chat is whitelisted (if a whitelist is defined)
+        chat_id = str(message.chat.id)
+        chat_username = getattr(message.chat, "username", None)
+        chat_type = message.chat.type.name  # e.g. "PRIVATE", "GROUP", etc.
+        if whitelist and not (
+            chat_id in whitelist or
+            (chat_username and chat_username in whitelist) or
+            f"`{chat_type}`" in whitelist
+        ):
+            return True  # ignore message if chat is not whitelisted
+
+        # Now check if the sender (from_user) is blacklisted
+        # This makes sure that even if the chat is allowed, messages from a blacklisted user will be ignored.
+        from_user = getattr(message, "from_user", None)
+        if from_user:
+            user_id = str(getattr(from_user, "id", ""))
+            user_username = getattr(from_user, "username", None)
+            if user_id in blacklist or (user_username and user_username in blacklist):
+                return True
+
+        # Optionally, you can keep a chat-level blacklist check as well if desired.
+        if chat_id in blacklist or (chat_username and chat_username in blacklist) or f"`{chat_type}`" in blacklist:
             return True
 
-        if username in blacklist or uid in blacklist or f"`{chat_type}`" in blacklist:
-            return True
+        return False
+
 
     @staticmethod
     def clean_user(user: "str"):
