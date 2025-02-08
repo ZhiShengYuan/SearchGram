@@ -7,8 +7,8 @@ Modified so that:
  - The owner (as defined by OWNER_ID) can search all messages.
  - All other users can only search messages from the allowed groups (if they are a member).
  - The allowed groups are defined as an array of strings.
+ - Since SearchEngine.search() does not accept a `group_id` parameter, filtering is applied after search.
 """
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
 
 __author__ = "Benny <benny.think@gmail.com>"
 
@@ -46,15 +46,8 @@ parser.add_argument("-u", "--user", help="the user who sent the message", defaul
 parser.add_argument("-m", "--mode", help="match mode, e: exact match, other value is fuzzy search", default=None)
 
 
-<<<<<<< HEAD
 def get_user_allowed_groups(client: "Client", user_id: int) -> list:
-=======
-# --- Helper Functions ---
-
-def get_user_allowed_groups(client: "Client", user_id: int) -> list:
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
     """
-<<<<<<< HEAD
     Returns a list of allowed group IDs (as strings) in which the user is a member.
     If the user is not a member of any allowed group, returns an empty list.
     """
@@ -68,21 +61,6 @@ def get_user_allowed_groups(client: "Client", user_id: int) -> list:
         except Exception as e:
             logging.error("Error checking membership for group %s: %s", group_id, e)
     return allowed_groups
-=======
-    Returns a list of allowed group IDs (as strings) in which the user is a member.
-    If the user is not a member of any allowed group, returns an empty list.
-    """
-    allowed_groups = []
-    for group_id in ALLOWED_GROUP_IDS:
-        try:
-            # Convert group_id to int when calling get_chat_member
-            member = client.get_chat_member(int(group_id), user_id)
-            if member.status not in ("left", "kicked"):
-                allowed_groups.append(group_id)
-        except Exception as e:
-            logging.error("Error checking membership for group %s: %s", group_id, e)
-    return allowed_groups
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
 
 
 def get_display_name(chat: dict):
@@ -106,7 +84,6 @@ def parse_search_results(data: "dict", group_filter=None):
     result = ""
     hits = data.get("hits", [])
     for hit in hits:
-<<<<<<< HEAD
         if group_filter is not None:
             # If group_filter is a list, only include the hit if its chat ID (converted to a string)
             # is in the allowed list.
@@ -116,16 +93,6 @@ def parse_search_results(data: "dict", group_filter=None):
             else:
                 if str(hit["chat"]["id"]) != str(group_filter):
                     continue
-=======
-        if group_filter is not None:
-            if isinstance(group_filter, list):
-                # Only include if the hit's chat id (converted to str) is in the allowed list.
-                if str(hit["chat"]["id"]) not in group_filter:
-                    continue
-            else:
-                if str(hit["chat"]["id"]) != str(group_filter):
-                    continue
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
         text = hit.get("text") or hit.get("caption")
         if not text:
             continue  # Skip messages without text or caption.
@@ -165,7 +132,6 @@ def generate_navigation(page, total_pages):
     return markup
 
 
-<<<<<<< HEAD
 def parse_and_search(query_text, page=1, user_id=None, group_filter=None) -> Tuple[str, InlineKeyboardMarkup | None]:
     """
     Parse the query text, check the Redis cache, and perform the search.
@@ -213,54 +179,6 @@ def parse_and_search(query_text, page=1, user_id=None, group_filter=None) -> Tup
     # Filter the results based on allowed groups (if group_filter is provided).
     text_result = parse_search_results(results, group_filter)
     if not text_result:
-=======
-def parse_and_search(query_text, page=1, user_id=None, group_filter=None) -> Tuple[str, InlineKeyboardMarkup | None]:
-    """
-    Parse the query text, check the Redis cache, and perform the search.
-    
-    - If group_filter is None then no group filter is applied (i.e. owner searching globally).
-    - Otherwise, group_filter can be a single group or a list of groups (as strings) to filter the search.
-    """
-    if user_id is None:
-        raise ValueError("user_id must be provided for caching purposes")
-    
-    # Create a cache key. If group_filter is a list, join its sorted values.
-    if group_filter is None:
-        group_key = "None"
-    elif isinstance(group_filter, list):
-        group_key = ",".join(sorted(group_filter))
-    else:
-        group_key = str(group_filter)
-    cache_key = f"search:{user_id}:{group_key}:{query_text}:{page}"
-    
-    results = None
-    try:
-        cached = redis_client.get(cache_key)
-        if cached:
-            results = pickle.loads(cached)
-            logging.info("Loaded cached search result for key %s", cache_key)
-    except Exception as e:
-        logging.error("Failed to load cached result: %s", e)
-
-    if results is None:
-        args = parser.parse_args(query_text.split())
-        _type = args.type
-        user_filter = args.user
-        keyword = args.keyword
-        mode = args.mode
-        logging.info("Search keyword: %s, type: %s, user: %s, page: %s, mode: %s",
-                     keyword, _type, user_filter, page, mode)
-        # Pass the group_filter to the search engine.
-        results = tgdb.search(keyword, _type, user_filter, page, mode, group_id=group_filter)
-        try:
-            redis_client.setex(cache_key, 86400, pickle.dumps(results))
-            logging.info("Cached search result for key %s", cache_key)
-        except Exception as e:
-            logging.error("Failed to set cache: %s", e)
-
-    text_result = parse_search_results(results, group_filter)
-    if not text_result:
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
         return "No results found", None
 
     total_hits = results.get("totalHits", 0)
@@ -271,7 +189,6 @@ def parse_and_search(query_text, page=1, user_id=None, group_filter=None) -> Tup
     return final_text, markup
 
 
-<<<<<<< HEAD
 @app.on_message(filters.command(["start"]))
 def start_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
@@ -313,54 +230,8 @@ def clean_handler(client: "Client", message: "types.Message"):
     client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
 
 
-=======
-# --- Handlers ---
-
-@app.on_message(filters.command(["start"]))
-def start_handler(client: "Client", message: "types.Message"):
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    message.reply_text("Hello, I'm search bot.", quote=True)
-
-
-@app.on_message(filters.command(["help"]))
-def help_handler(client: "Client", message: "types.Message"):
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    help_text = f"""
-SearchGram Search syntax Help:
-1. **global search**: send any message to the bot 
-2. **chat type search**: `-t=GROUP keyword`, support types are {chat_types}
-3. **chat user search**: `-u=user_id|username keyword`
-4. **exact match**: `-m=e keyword` or directly add double-quotes `"keyword"`
-5. Combine of above: `-t=GROUP -u=user_id|username keyword`
-6. `/private [username] keyword`: search in private chat with username, if username is omitted, search in all private chats.
-    """
-    message.reply_text(help_text, quote=True)
-
-
-@app.on_message(filters.command(["ping"]))
-def ping_handler(client: "Client", message: "types.Message"):
-    # Only the owner can use the ping command.
-    if message.chat.id != int(OWNER_ID):
-        return
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    text = tgdb.ping()
-    client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
-
-
-@app.on_message(filters.command(["delete"]))
-def clean_handler(client: "Client", message: "types.Message"):
-    # Only the owner can use the delete command.
-    if message.chat.id != int(OWNER_ID):
-        return
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    text = tgdb.ping()
-    client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
-
-
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
 @app.on_message(filters.command(chat_types) & filters.text & filters.incoming)
 def type_search_handler(client: "Client", message: "types.Message"):
-<<<<<<< HEAD
     user_id = message.from_user.id
     if user_id != int(OWNER_ID):
         user_groups = get_user_allowed_groups(client, user_id)
@@ -371,19 +242,6 @@ def type_search_handler(client: "Client", message: "types.Message"):
     else:
         group_filter = None  # Owner searches globally.
 
-=======
-    user_id = message.from_user.id
-    # For non-owner users, check which allowed groups they are a member of.
-    if user_id != int(OWNER_ID):
-        user_groups = get_user_allowed_groups(client, user_id)
-        if not user_groups:
-            message.reply_text("You must join one of our groups to use the search feature. Please join one first.")
-            return
-        group_filter = user_groups
-    else:
-        group_filter = None  # Owner: no group filter, search globally.
-
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
     parts = message.text.split(maxsplit=2)
     chat_type = parts[0][1:].upper()
     if len(parts) == 1:
@@ -410,7 +268,6 @@ def type_search_handler(client: "Client", message: "types.Message"):
 
 @app.on_message(filters.text & filters.incoming)
 def search_handler(client: "Client", message: "types.Message"):
-<<<<<<< HEAD
     user_id = message.from_user.id
     if user_id != int(OWNER_ID):
         user_groups = get_user_allowed_groups(client, user_id)
@@ -421,19 +278,6 @@ def search_handler(client: "Client", message: "types.Message"):
     else:
         group_filter = None
 
-=======
-    user_id = message.from_user.id
-    # For non-owner users, determine the allowed groups in which they are a member.
-    if user_id != int(OWNER_ID):
-        user_groups = get_user_allowed_groups(client, user_id)
-        if not user_groups:
-            message.reply_text("You must join one of our groups to use the search feature. Please join one first.")
-            return
-        group_filter = user_groups
-    else:
-        group_filter = None
-
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     text, markup = parse_and_search(message.text, user_id=user_id, group_filter=group_filter)
     if len(text) > 4096:
@@ -455,7 +299,6 @@ def search_handler(client: "Client", message: "types.Message"):
 
 @app.on_callback_query(filters.regex(r"^(n|p)\|"))
 def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
-<<<<<<< HEAD
     user_id = callback_query.from_user.id
     if user_id != int(OWNER_ID):
         user_groups = get_user_allowed_groups(client, user_id)
@@ -468,21 +311,6 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
 
     direction, page_str = callback_query.data.split("|")
     page = int(page_str)
-=======
-    user_id = callback_query.from_user.id
-    # For non-owner users, determine the allowed groups in which they are a member.
-    if user_id != int(OWNER_ID):
-        user_groups = get_user_allowed_groups(client, user_id)
-        if not user_groups:
-            callback_query.answer("You must join one of our groups to use the search feature.", show_alert=True)
-            return
-        group_filter = user_groups
-    else:
-        group_filter = None
-
-    direction, page_str = callback_query.data.split("|")
-    page = int(page_str)
->>>>>>> 99fc25907d251dc8a59f4837722764defe45fbc2
     if direction == "n":
         new_page = page + 1
     elif direction == "p":
