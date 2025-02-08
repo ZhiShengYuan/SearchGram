@@ -21,7 +21,7 @@ def get_client(token=None):
         proxy = json.loads(PROXY)
     else:
         proxy = PROXY
-    app_device = dict(app_version=f"SearchGram/{get_revision()}", device_model="Firefox", proxy=proxy)
+    app_device = dict(app_version=f"QuickGram/0.0.1", device_model="Chrome", proxy=proxy)
     if token:
         return Client("session/bot", APP_ID, APP_HASH, bot_token=token, ipv6=IPv6, **app_device)
     else:

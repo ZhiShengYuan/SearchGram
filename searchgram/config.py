@@ -32,7 +32,7 @@ ZINC_PASS = os.getenv("ZINC_FIRST_ADMIN_PASSWORD", "root")
 
 ####################################
 # Your own user id, for example: 260260121
-OWNER_ID = os.getenv("OWNER_ID", "260260121")
+OWNER_ID = os.getenv("OWNER_ID", "00000000")
 BOT_ID = int(TOKEN.split(":")[0])
 
 PROXY = os.getenv("PROXY")
