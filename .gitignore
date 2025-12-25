@@ -167,3 +167,7 @@ searchgram-engine/fail2ban/
 *.pem
 *.key
 *.crt
+
+# Go build artifacts
+searchgram-engine/searchgram-engine
+searchgram-engine/searchgram-engine.exe

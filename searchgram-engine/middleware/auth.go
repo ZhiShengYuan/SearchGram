@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
@@ -48,13 +49,13 @@ func APIKeyAuth(enabled bool, apiKey string) gin.HandlerFunc {
 func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Start timer
-		start := c.GetTime("start")
+		start := time.Now()
 
 		// Process request
 		c.Next()
 
 		// Calculate latency
-		latency := c.GetDuration("latency")
+		latency := time.Since(start)
 
 		// Log request
 		log.WithFields(log.Fields{

@@ -347,9 +347,9 @@ func (e *ElasticsearchEngine) Clear() error {
 func (e *ElasticsearchEngine) Ping() (*models.PingResponse, error) {
 	ctx := context.Background()
 
-	// Check cluster health
-	_, _, err := e.client.Ping(e.client.(*elastic.Client).(*elastic.Client)).Do(ctx)
-	if err != nil {
+	// Get ES info (includes version and health)
+	info, code, err := e.client.Ping(e.client.String()).Do(ctx)
+	if err != nil || code != 200 {
 		return &models.PingResponse{
 			Status: "error",
 			Engine: "elasticsearch",
@@ -362,10 +362,9 @@ func (e *ElasticsearchEngine) Ping() (*models.PingResponse, error) {
 		count = 0
 	}
 
-	// Get ES version
-	info, _, err := e.client.Ping(e.client.(*elastic.Client).(*elastic.Client)).Do(ctx)
+	// Extract version
 	version := ""
-	if err == nil && info != nil {
+	if info != nil {
 		version = info.Version.Number
 	}
 
