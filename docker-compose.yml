@@ -1,23 +1,56 @@
-version: '3.1'
+version: '3.8'
 
 services:
+  # Go Search Service - Handles all search engine operations
+  searchgram-engine:
+    build: ./searchgram-engine
+    container_name: searchgram-engine
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      - ENGINE_TYPE=elasticsearch
+      - ENGINE_ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - ENGINE_ELASTICSEARCH_USERNAME=elastic
+      - ENGINE_ELASTICSEARCH_PASSWORD=changeme
+      - ENGINE_LOGGING_LEVEL=info
+    depends_on:
+      - elasticsearch
+    networks:
+      - searchgram-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   client:
     image: bennythink/searchgram
-    env_file:
-      - env/gram.env
     restart: always
     volumes:
+      - ./config.json:/SearchGram/config.json:ro
       - ./sg_data/session:/SearchGram/searchgram/session
-    command: [ "python", "client.py" ]
+      - ./sg_data/privacy:/SearchGram/privacy_data.json
+      - ./sg_data/sync:/SearchGram/sync_progress.json
+    command: [ "python", "searchgram/client.py" ]
+    depends_on:
+      - searchgram-engine
+    networks:
+      - searchgram-network
 
   bot:
     image: bennythink/searchgram
-    env_file:
-      - env/gram.env
     restart: always
     volumes:
+      - ./config.json:/SearchGram/config.json:ro
       - ./sg_data/session:/SearchGram/searchgram/session
-    command: [ "python", "bot.py" ]
+      - ./sg_data/privacy:/SearchGram/privacy_data.json
+    command: [ "python", "searchgram/bot.py" ]
+    depends_on:
+      - searchgram-engine
+    networks:
+      - searchgram-network
 
   meili:
     image: getmeili/meilisearch:v1.1.1
@@ -56,11 +89,16 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=changeme
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    env_file:
-      - env/gram.env
     volumes:
       - ./sg_data/elasticsearch:/usr/share/elasticsearch/data
     ports:
       - "127.0.0.1:9200:9200"
       - "127.0.0.1:9300:9300"
+    networks:
+      - searchgram-network
+
+networks:
+  searchgram-network:
+    driver: bridge

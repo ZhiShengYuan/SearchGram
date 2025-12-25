@@ -8,27 +8,38 @@ SearchGram is a Telegram bot that improves search experience for CJK (Chinese, J
 
 ## Architecture
 
-The project has a **dual-process architecture**:
+The project has a **microservice architecture** with three main components:
 
-1. **Client Process** (`searchgram/client.py`):
+1. **Go Search Service** (`searchgram-engine/`):
+   - Standalone Go microservice that handles all search engine operations
+   - Runs in the same LAN as Elasticsearch for low-latency access
+   - Exposes REST API (port 8080) for Python services to communicate
+   - Benefits: Better performance, credential isolation, horizontal scalability
+   - CJK-optimized Elasticsearch backend with bigram tokenization
+
+2. **Client Process** (`searchgram/client.py`):
    - Runs as a user session (requires phone number login)
    - Intercepts all incoming/outgoing messages (except from the bot itself)
-   - Indexes messages into the configured search engine
-   - Handles background chat history sync from `sync.ini` configuration
+   - Sends messages to Go search service via HTTP API for indexing
+   - Handles background chat history sync from `config.json`
 
-2. **Bot Process** (`searchgram/bot.py`):
+3. **Bot Process** (`searchgram/bot.py`):
    - Runs as a Telegram bot (uses bot token)
    - Provides search interface via commands and text messages
    - Supports three access modes: private (owner only), group (whitelisted), public (anyone)
+   - Sends search queries to Go service via HTTP API
    - Parses search queries and returns paginated results with inline navigation
    - Includes privacy controls: users can opt-out via `/block_me` command
    - Filters search results to exclude messages from blocked users
 
-**Search Engine Abstraction**: The project uses a plugin architecture via `searchgram/__init__.py` that dynamically loads one of four search backends based on the `ENGINE` environment variable:
-- `meili` (default): MeiliSearch - typo-tolerant, fuzzy search
-- `mongo`: MongoDB - regex-based search with CJK conversion
-- `zinc`: ZincSearch - full-text search
-- `elastic`: Elasticsearch - high-performance, CJK-optimized full-text search with advanced features
+**Search Engine Abstraction**: The project uses a plugin architecture via `searchgram/__init__.py` that dynamically loads search backends based on the `ENGINE` config:
+- `http` (recommended): Go search service via HTTP API - best performance, security, scalability
+- `meili`: MeiliSearch - typo-tolerant, fuzzy search (legacy, direct connection)
+- `mongo`: MongoDB - regex-based search with CJK conversion (legacy, direct connection)
+- `zinc`: ZincSearch - full-text search (legacy, direct connection)
+- `elastic`: Elasticsearch - CJK-optimized (legacy, direct connection)
+
+**Recommended Setup**: Use `engine: http` to leverage the Go search service for better performance and security. The Go service handles Elasticsearch connection pooling, credentials, and optimization internally.
 
 All engines implement the `BasicSearchEngine` interface from `searchgram/engine.py` with methods: `upsert()`, `search()`, `ping()`, `clear_db()`, and `delete_user()`.
 
@@ -47,9 +58,15 @@ All configuration is managed by `searchgram/config_loader.py`:
 - `OWNER_ID`: User ID of the bot owner (always has full access)
 
 **Search Engine Settings:**
-- `ENGINE`: Search backend (`meili`, `mongo`, `zinc`, or `elastic`)
-- `MEILI_HOST`, `MONGO_HOST`, `ZINC_HOST`, `ELASTIC_HOST`: Search engine endpoints
-- `ELASTIC_USER`, `ELASTIC_PASS`: Elasticsearch authentication credentials
+- `ENGINE`: Search backend (`http`, `meili`, `mongo`, `zinc`, or `elastic`)
+- For `http` (recommended):
+  - `HTTP_BASE_URL`: Go search service URL (default: `http://searchgram-engine:8080`)
+  - `HTTP_API_KEY`: Optional API key for authentication
+  - `HTTP_TIMEOUT`: Request timeout in seconds (default: 30)
+  - `HTTP_MAX_RETRIES`: Max retry attempts (default: 3)
+- For legacy direct connections:
+  - `MEILI_HOST`, `MONGO_HOST`, `ZINC_HOST`, `ELASTIC_HOST`: Search engine endpoints
+  - `ELASTIC_USER`, `ELASTIC_PASS`: Elasticsearch authentication credentials
 
 **Access Control (NEW):**
 - `BOT_MODE`: Access control mode - `private` (owner only), `group` (whitelisted groups), `public` (anyone)

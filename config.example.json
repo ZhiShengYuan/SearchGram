@@ -8,7 +8,13 @@
     "ipv6": false
   },
   "search_engine": {
-    "engine": "elastic",
+    "engine": "http",
+    "http": {
+      "base_url": "http://searchgram-engine:8080",
+      "api_key": null,
+      "timeout": 30,
+      "max_retries": 3
+    },
     "meili": {
       "host": "http://meili:7700",
       "master_key": null

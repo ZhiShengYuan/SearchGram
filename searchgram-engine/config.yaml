@@ -1,0 +1,31 @@
+# SearchGram Search Engine Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+
+search_engine:
+  # Supported types: elasticsearch, meilisearch, mongodb, zinc
+  type: "elasticsearch"
+
+elasticsearch:
+  host: "http://elasticsearch:9200"
+  username: "elastic"
+  password: "changeme"
+  index: "telegram"
+  shards: 3
+  replicas: 1
+
+auth:
+  enabled: false
+  api_key: ""  # Set this if auth is enabled
+
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json or text
+
+cache:
+  enabled: false
+  ttl: 300  # seconds
