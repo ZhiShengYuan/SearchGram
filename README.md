@@ -14,14 +14,26 @@ Issues regarding this have been reported years ago but have yet to be resolved.
 
 # Feature
 
-* Supports text message search
-* Provides typo-tolerant and fuzzy search for CJK languages
-* Supports filters for GROUP, CHANNEL, PRIVATE, SUPERGROUP, and BOT
-* Supports username/ID filtering
-* Supports caption search for photos and documents
-* Supports seamless chat history sync in the background
-* Provides pagination
-* Uses a WebUI for searching
+**Search Capabilities:**
+* Text message search with CJK language support
+* Typo-tolerant and fuzzy search for Chinese, Japanese, Korean
+* Filters for GROUP, CHANNEL, PRIVATE, SUPERGROUP, and BOT chat types
+* Username/ID filtering for targeted searches
+* Caption search for photos and documents
+* Seamless background chat history sync
+* Paginated results with inline navigation
+
+**Privacy & Access Control (NEW):**
+* 🔒 **User Privacy Controls**: Anyone can opt-out via `/block_me` command
+* 🔐 **Three Access Modes**: Private (owner only), Group (whitelisted), Public
+* 🛡️ **Privacy-First**: Blocked users automatically filtered from all search results
+* 👥 **Group Support**: Works in whitelisted Telegram groups
+* 📊 **Transparent**: Shows who requested searches in group mode
+
+**Performance & Reliability:**
+* Multiple search engine backends (MeiliSearch, MongoDB, ZincSearch, **Elasticsearch**)
+* Automatic bot message filtering to prevent circular indexing
+* Statistics tracking for monitoring performance
 
 # search syntax
 
@@ -35,17 +47,28 @@ Issues regarding this have been reported years ago but have yet to be resolved.
 
 # commands
 
+**Search Commands:**
 ```shell
 /start - Start the bot
-/ping - Check if the bot is alive
-/help - Show help message and search syntax
-/delete - Delete all messages from specific chat
+/help - Show comprehensive help with search syntax and privacy info
+/ping - Check bot health and database stats (owner only)
+/delete - Delete all messages from specific chat (owner only)
 /bot - Search messages from bots
 /channel - Search messages from channels
 /group - Search messages from groups
 /private - Search messages from private chats
 /supergroup - Search messages from supergroups
 ```
+
+**Privacy Commands (NEW):**
+```shell
+/block_me - Opt-out: Your messages won't appear in anyone's search
+/unblock_me - Opt-in: Allow your messages in search results
+/privacy_status - Check your current privacy status
+```
+
+**Why Privacy Matters:**
+SearchGram indexes messages for search, but respects your privacy. Use `/block_me` anytime to remove yourself from search results. Your choice, your data! 🛡️
 
 # Theory
 
@@ -69,15 +92,25 @@ you can relax because SearchGram offers a solution to sync your chat history usi
 
 # System Requirements
 
-Any system that can run Python 3.8+ and MeiliSearch should be able to run SearchGram.
+Any system that can run Python 3.8+ and one of the supported search engines should be able to run SearchGram.
 
-Better to have bigger ram so MeiliSearch can run faster.
+## Supported Search Engines
 
-If you have limited RAM, you can set environment variables `MEILI_MAX_INDEXING_MEMORY=800M` to limit the RAM use in
-MeiliSearch.
+SearchGram supports multiple search backends:
 
-For more information, please
-see [Max indexing memory](https://www.meilisearch.com/docs/learn/configuration/instance_options#max-indexing-memory)
+- **MeiliSearch** (default) - Fast, typo-tolerant search with good CJK support
+- **MongoDB** - Document database with regex-based search and CJK conversion
+- **ZincSearch** - Lightweight full-text search engine
+- **Elasticsearch** - High-performance, enterprise-grade search with advanced CJK optimization (recommended for best search quality and high-volume deployments)
+
+### Memory Requirements
+
+Better to have bigger RAM for optimal performance:
+
+- **MeiliSearch**: Can limit memory usage with `MEILI_MAX_INDEXING_MEMORY=800M` ([docs](https://www.meilisearch.com/docs/learn/configuration/instance_options#max-indexing-memory))
+- **Elasticsearch**: Recommended at least 1GB RAM, configure Java heap size via `ES_JAVA_OPTS=-Xms512m -Xmx512m`
+- **MongoDB**: Typically requires 1-2GB RAM for good performance
+- **ZincSearch**: Lightweight, works well with limited resources
 
 # Installation
 
@@ -87,7 +120,24 @@ Please follow the steps below to install SearchGram on your own server.
 
 This guide will show you how to install SearchGram with our default search engine, MeiliSearch.
 
-**To learn how to use SearchGram in Docker with different search engine, please refer to the [Docker.md](Docker.md)**
+**To learn how to use SearchGram in Docker with different search engines (MongoDB, ZincSearch, or Elasticsearch), please refer to the [Docker.md](Docker.md)**
+
+### Using Elasticsearch
+
+To use Elasticsearch instead of MeiliSearch, set the `ENGINE` environment variable to `elastic`:
+
+```python
+ENGINE = "elastic"
+ELASTIC_HOST = "http://localhost:9200"
+ELASTIC_USER = "elastic"
+ELASTIC_PASS = "your-password"
+```
+
+Elasticsearch provides the best search quality with:
+- CJK bigram tokenization for optimal Chinese/Japanese/Korean search
+- Advanced filtering and sorting capabilities
+- Better performance for large message volumes (millions of messages)
+- Professional-grade scalability and reliability
 
 ## 1. Preparation
 
@@ -103,11 +153,22 @@ This guide will show you how to install SearchGram with our default search engin
 Use your favorite editor to modify `config.py`, example:
 
 ```python
+# Telegram credentials
 APP_ID = 176552
 APP_HASH = "667276jkajhw"
 TOKEN = "123456:8hjhad"
-MEILI_HOST = "localhost"
 OWNER_ID = "2311231"
+
+# Search engine (meili, mongo, zinc, elastic)
+ENGINE = "meili"
+MEILI_HOST = "localhost"
+
+# Access control (private, group, public)
+BOT_MODE = "private"  # Default: owner only
+
+# For group mode (optional):
+# ALLOWED_GROUPS = [-1001234567890, -1009876543210]
+# ALLOWED_USERS = [123456789, 987654321]
 ```
 
 If you have limited network access, such as in China, you will need to set up a proxy.
@@ -115,6 +176,18 @@ If you have limited network access, such as in China, you will need to set up a 
 ```python
 PROXY = {"scheme": "socks5", "hostname": "localhost", "port": 1080}
 ```
+
+### Group Mode Configuration
+
+To enable the bot in Telegram groups:
+
+```python
+BOT_MODE = "group"
+ALLOWED_GROUPS = [-1001234567890]  # Your group IDs
+ALLOWED_USERS = [123456789]  # Additional authorized users
+```
+
+Then add the bot to your group and anyone in the group can search (with privacy controls).
 
 ## 3. Login to client
 

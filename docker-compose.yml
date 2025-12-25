@@ -49,3 +49,18 @@ services:
       - ./sg_data/zinc:/data
     ports:
       - "127.0.0.1:4080:4080"
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    restart: always
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    env_file:
+      - env/gram.env
+    volumes:
+      - ./sg_data/elasticsearch:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+      - "127.0.0.1:9300:9300"

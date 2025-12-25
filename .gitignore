@@ -143,3 +143,11 @@ mongo_data/*
 searchgram/session/*
 /sg_data/*
 /.idea/*
+
+# SearchGram configuration and sensitive data
+config.json
+*.json.backup
+privacy_data.json
+sync_progress.json
+sync.ini
+sync.ini.backup

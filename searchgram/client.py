@@ -7,9 +7,7 @@
 
 __author__ = "Benny <benny.think@gmail.com>"
 
-import configparser
 import logging
-import random
 import threading
 import time
 
@@ -17,8 +15,9 @@ import fakeredis
 from pyrogram import Client, filters, types
 
 from __init__ import SearchEngine
-from config import BOT_ID
+from config_loader import BOT_ID, SYNC_ENABLED, get_config
 from init_client import get_client
+from sync_manager import SyncManager
 from utils import setup_logger
 
 setup_logger()
@@ -27,58 +26,163 @@ app = get_client()
 tgdb = SearchEngine()
 r = fakeredis.FakeStrictRedis()
 
+# Initialize sync manager
+sync_manager = SyncManager(app, tgdb)
 
-@app.on_message((filters.outgoing | filters.incoming) & ~filters.chat(BOT_ID))
+# Statistics tracking
+stats = {
+    "indexed": 0,
+    "edited": 0,
+    "bot_skipped": 0,
+    "start_time": time.time()
+}
+
+
+@app.on_message((filters.outgoing | filters.incoming))
 def message_handler(client: "Client", message: "types.Message"):
+    # Check if message is from the bot itself - skip to prevent circular indexing
+    if message.chat.id == BOT_ID:
+        stats["bot_skipped"] += 1
+        logging.debug("Skipping bot message: %s-%s (total skipped: %d)", message.chat.id, message.id, stats["bot_skipped"])
+        return
+
     logging.info("Adding new message: %s-%s", message.chat.id, message.id)
     tgdb.upsert(message)
+    stats["indexed"] += 1
+
+    # Log stats every 100 messages
+    if stats["indexed"] % 100 == 0:
+        elapsed = time.time() - stats["start_time"]
+        logging.info(
+            "📊 Stats: %d indexed, %d edited, %d bot messages skipped (%.1f msgs/min)",
+            stats["indexed"], stats["edited"], stats["bot_skipped"],
+            (stats["indexed"] + stats["edited"]) / (elapsed / 60) if elapsed > 0 else 0
+        )
 
 
-@app.on_edited_message(~filters.chat(BOT_ID))
+@app.on_edited_message()
 def message_edit_handler(client: "Client", message: "types.Message"):
+    # Check if message is from the bot itself - skip to prevent circular indexing
+    if message.chat.id == BOT_ID:
+        logging.debug("Skipping bot edited message: %s-%s", message.chat.id, message.id)
+        return
+
     logging.info("Editing old message: %s-%s", message.chat.id, message.id)
     tgdb.upsert(message)
+    stats["edited"] += 1
 
 
-def safe_edit(msg, new_text):
-    key = "sync-chat"
-    if not r.exists(key):
-        time.sleep(random.random())
-        r.set(key, "ok", ex=2)
-        msg.edit_text(new_text)
+def sync_history_new():
+    """
+    New sync system with resume capability and checkpoint support.
+    Replaces the old sync.ini-based system.
+    """
+    if not SYNC_ENABLED:
+        logging.info("Sync is disabled in configuration")
+        return
 
-
-def sync_history():
+    # Wait for client to be ready
     time.sleep(30)
-    config = configparser.ConfigParser(allow_no_value=True)
-    config.optionxform = lambda option: option
-    config.read("sync.ini")
 
-    if config.items("sync"):
-        saved = app.send_message("me", "Starting to sync history...")
+    # Load chat list from config
+    config = get_config()
+    sync_chats = config.get_list("sync.chats", [], item_type=int)
 
-        for uid in config.options("sync"):
-            total_count = app.get_chat_history_count(uid)
-            log = f"Syncing history for {uid}"
-            logging.info(log)
-            safe_edit(saved, log)
-            time.sleep(random.random())  # avoid flood
-            chat_records = app.get_chat_history(uid)
-            current = 0
-            for msg in chat_records:
-                safe_edit(saved, f"[{current}/{total_count}] - {log}")
-                current += 1
-                tgdb.upsert(msg)
-            config.remove_option("sync", uid)
+    if not sync_chats and not sync_manager.get_all_progress():
+        logging.info("No chats configured for sync and no pending syncs")
+        return
 
-        with open("sync.ini", "w") as configfile:
-            config.write(configfile)
+    # Add new chats from config to sync queue
+    for chat_id in sync_chats:
+        sync_manager.add_chat(chat_id)
 
-        log = "Sync history complete"
-        logging.info(log)
-        safe_edit(saved, log)
+    # Get summary before starting
+    summary = sync_manager.get_summary()
+    logging.info(
+        f"📊 Sync Queue: {summary['total_chats']} chats, "
+        f"{summary['pending']} pending, {summary['completed']} completed, "
+        f"{summary['failed']} failed"
+    )
+
+    # Send progress notification to saved messages
+    try:
+        progress_msg = app.send_message("me", "🔄 Starting history sync...\n\nInitializing...")
+    except:
+        progress_msg = None
+
+    def update_progress(progress):
+        """Callback to update progress message."""
+        if not progress_msg:
+            return
+
+        try:
+            # Rate limit updates
+            key = f"sync-update-{progress.chat_id}"
+            if not r.exists(key):
+                r.set(key, "ok", ex=5)  # Update at most every 5 seconds
+
+                summary = sync_manager.get_summary()
+                text = f"""
+🔄 **History Sync Progress**
+
+**Current Chat:** `{progress.chat_id}`
+**Progress:** {progress.synced_count}/{progress.total_count} ({progress.to_dict()['progress_percent']}%)
+**Status:** {progress.status}
+
+**Overall:**
+• Total Chats: {summary['total_chats']}
+• Completed: {summary['completed']}
+• In Progress: {summary['in_progress']}
+• Pending: {summary['pending']}
+• Failed: {summary['failed']}
+
+**Messages:** {summary['synced_messages']}/{summary['total_messages']} ({summary['progress_percent']}%)
+                """
+                progress_msg.edit_text(text.strip())
+        except Exception as e:
+            logging.debug(f"Failed to update progress message: {e}")
+
+    # Start synchronization
+    logging.info("🚀 Starting history synchronization...")
+    results = sync_manager.sync_all(progress_callback=update_progress)
+
+    # Final summary
+    summary = sync_manager.get_summary()
+    success_count = sum(1 for success in results.values() if success)
+    fail_count = sum(1 for success in results.values() if not success)
+
+    final_text = f"""
+✅ **History Sync Complete**
+
+**Results:**
+• Success: {success_count} chats
+• Failed: {fail_count} chats
+• Total Messages: {summary['synced_messages']}
+
+**Status:**
+• Completed: {summary['completed']}
+• Failed: {summary['failed']}
+• Pending: {summary['pending']}
+
+Sync checkpoint saved. You can resume anytime!
+    """
+
+    if progress_msg:
+        try:
+            progress_msg.edit_text(final_text.strip())
+        except:
+            pass
+
+    logging.info(
+        f"✅ Sync complete: {success_count} successful, {fail_count} failed, "
+        f"{summary['synced_messages']} messages indexed"
+    )
+
+    # Clean up completed chats
+    sync_manager.clear_completed()
 
 
 if __name__ == "__main__":
-    threading.Thread(target=sync_history).start()
+    # Start sync in background thread
+    threading.Thread(target=sync_history_new, daemon=True).start()
     app.run()

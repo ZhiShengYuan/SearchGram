@@ -1,0 +1,48 @@
+{
+  "telegram": {
+    "app_id": 123456,
+    "app_hash": "your_app_hash_here",
+    "bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+    "owner_id": 260260121,
+    "proxy": null,
+    "ipv6": false
+  },
+  "search_engine": {
+    "engine": "elastic",
+    "meili": {
+      "host": "http://meili:7700",
+      "master_key": null
+    },
+    "mongo": {
+      "host": "mongo",
+      "port": 27017
+    },
+    "zinc": {
+      "host": "http://zinc:4080",
+      "user": "root",
+      "password": "root"
+    },
+    "elastic": {
+      "host": "http://elasticsearch:9200",
+      "user": "elastic",
+      "password": "changeme"
+    }
+  },
+  "bot": {
+    "mode": "private",
+    "allowed_groups": [],
+    "allowed_users": []
+  },
+  "privacy": {
+    "storage_file": "privacy_data.json"
+  },
+  "sync": {
+    "enabled": true,
+    "checkpoint_file": "sync_progress.json",
+    "batch_size": 100,
+    "retry_on_error": true,
+    "max_retries": 3,
+    "resume_on_restart": true,
+    "chats": []
+  }
+}

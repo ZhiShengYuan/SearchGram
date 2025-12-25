@@ -16,8 +16,10 @@ from pyrogram import Client, enums, filters, types
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from __init__ import SearchEngine
-from config import OWNER_ID, TOKEN
+from access_control import require_access, require_owner, access_controller
+from config_loader import BOT_MODE, TOKEN
 from init_client import get_client
+from privacy import privacy_manager
 from utils import setup_logger
 
 tgdb = SearchEngine()
@@ -32,17 +34,6 @@ parser.add_argument("-u", "--user", help="the user who sent the message", defaul
 parser.add_argument("-m", "--mode", help="match mode, e: exact match, other value is fuzzy search", default=None)
 
 
-def private_use(func):
-    def wrapper(client: "Client", message: "types.Message"):
-        chat_id = getattr(message.chat, "id", None)
-        if chat_id != int(OWNER_ID):
-            logging.warning("Unauthorized user: %s", chat_id)
-            return
-        return func(client, message)
-
-    return wrapper
-
-
 @app.on_message(filters.command(["start"]))
 def search_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
@@ -52,33 +43,148 @@ def search_handler(client: "Client", message: "types.Message"):
 @app.on_message(filters.command(["help"]))
 def help_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    # Get requester info for personalization
+    user = message.from_user
+    user_name = user.first_name if user else "User"
+
     help_text = f"""
-SearchGram Search syntax Help:
-1. **global search**: send any message to the bot \n
-2. **chat type search**: `-t=GROUP keyword`, support types are {chat_types}\n
-3. **chat user search**: `-u=user_id|username keyword`\n
-4. **exact match**: `-m=e keyword` or directly add double-quotes `"keyword"`\n
-5. combine of above: `-t=GROUP -u=user_id|username keyword`\n
-6. `/private [username] keyword`: search in private chat with username, if username is omitted, search in all private chats. 
-This also applies to all above search types.\n
+**SearchGram Help** 👋 {user_name}
+
+**🔍 Search Syntax:**
+1. **Global search**: Send any message to search all chats
+2. **Chat type search**: `-t=GROUP keyword`
+   - Supported types: {', '.join(chat_types)}
+3. **User search**: `-u=user_id|username keyword`
+4. **Exact match**: `-m=e keyword` or `"keyword"`
+5. **Combined**: `-t=GROUP -u=username keyword`
+6. **Type shortcuts**: `/private [username] keyword`
+
+**🔐 Privacy Commands:**
+- `/block_me` - Opt-out: Your messages won't appear in anyone's search
+- `/unblock_me` - Opt-in: Allow your messages in search results
+- `/privacy_status` - Check your current privacy status
+
+**⚙️ Bot Mode:** {BOT_MODE}
+{f"**Blocked Users:** {privacy_manager.get_blocked_count()}" if access_controller.is_owner(user.id if user else 0) else ""}
+
+**📖 Privacy Notice:**
+This bot indexes messages for search. Use `/block_me` anytime to remove yourself from search results. Your privacy matters! 🛡️
     """
-    message.reply_text(help_text, quote=True)
+    message.reply_text(help_text, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
 
 
 @app.on_message(filters.command(["ping"]))
-@private_use
+@require_owner
 def ping_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     text = tgdb.ping()
+    text += f"\n🔐 Privacy: {privacy_manager.get_blocked_count()} users opted out"
     client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
 
 
 @app.on_message(filters.command(["delete"]))
-@private_use
+@require_owner
 def clean_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     text = tgdb.ping()
     client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+
+
+@app.on_message(filters.command(["block_me", "optout", "privacy_block"]))
+def block_me_handler(client: "Client", message: "types.Message"):
+    """Allow users to opt-out of search results."""
+    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    user = message.from_user
+    if not user:
+        message.reply_text("❌ Could not identify your user ID.", quote=True)
+        return
+
+    user_id = user.id
+    was_new = privacy_manager.block_user(user_id)
+
+    if was_new:
+        response = f"""
+✅ **Privacy Protection Enabled**
+
+Your messages have been removed from search results.
+
+**What this means:**
+- Your existing messages won't appear in search
+- Future messages won't be searchable
+- This applies to all chats where this bot is active
+
+**To reverse this:** Use `/unblock_me` anytime
+
+Your privacy is important! 🛡️
+        """
+    else:
+        response = "✅ You were already blocked from search results. You're all set! 🛡️"
+
+    message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+
+@app.on_message(filters.command(["unblock_me", "optin", "privacy_unblock"]))
+def unblock_me_handler(client: "Client", message: "types.Message"):
+    """Allow users to opt back into search results."""
+    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    user = message.from_user
+    if not user:
+        message.reply_text("❌ Could not identify your user ID.", quote=True)
+        return
+
+    user_id = user.id
+    was_blocked = privacy_manager.unblock_user(user_id)
+
+    if was_blocked:
+        response = f"""
+✅ **Privacy Protection Disabled**
+
+Your messages will now appear in search results again.
+
+**What this means:**
+- Your messages are now searchable
+- This applies to all indexed chats
+
+**To block again:** Use `/block_me` anytime
+        """
+    else:
+        response = "✅ You weren't blocked. Your messages are already searchable."
+
+    message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+
+@app.on_message(filters.command(["privacy_status", "privacy", "mystatus"]))
+def privacy_status_handler(client: "Client", message: "types.Message"):
+    """Check user's current privacy status."""
+    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    user = message.from_user
+    if not user:
+        message.reply_text("❌ Could not identify your user ID.", quote=True)
+        return
+
+    user_id = user.id
+    is_blocked = privacy_manager.is_blocked(user_id)
+
+    status_emoji = "🔒" if is_blocked else "🔓"
+    status_text = "**BLOCKED**" if is_blocked else "**SEARCHABLE**"
+
+    response = f"""
+{status_emoji} **Your Privacy Status**
+
+**Status:** {status_text}
+**User ID:** `{user_id}`
+
+{f"✅ Your messages are hidden from search results." if is_blocked else "⚠️ Your messages can appear in search results."}
+
+**Available commands:**
+- {"/unblock_me - Allow search" if is_blocked else "/block_me - Block from search"}
+    """
+
+    message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
 
 
 def get_display_name(chat: dict):
@@ -144,7 +250,7 @@ def generate_navigation(page, total_pages):
     return markup
 
 
-def parse_and_search(text, page=1) -> Tuple[str, InlineKeyboardMarkup | None]:
+def parse_and_search(text, page=1, requester_info=None) -> Tuple[str, InlineKeyboardMarkup | None]:
     # return text and markup
     args = parser.parse_args(text.split())
     _type = args.type
@@ -152,20 +258,51 @@ def parse_and_search(text, page=1) -> Tuple[str, InlineKeyboardMarkup | None]:
     keyword = args.keyword
     mode = args.mode
     logging.info("Search keyword: %s, type: %s, user: %s, page: %s, mode: %s", keyword, _type, user, page, mode)
+
+    # Perform search
     results = tgdb.search(keyword, _type, user, page, mode)
+
+    # Filter results to exclude blocked users (privacy control)
+    results = privacy_manager.filter_search_results(results)
+
     text = parse_search_results(results)
     if not text:
-        return "No results found", None
+        return "No results found. Try different keywords or check privacy settings.", None
 
     total_hits = results["totalHits"]
     total_pages = results["totalPages"]
     page = results["page"]
+    processing_time = results.get("processingTimeMs", 0)
+
+    # Add header with stats
+    header = f"🔍 **Search Results**\n"
+    header += f"**Hits:** {total_hits} | **Page:** {page}/{total_pages} | **Time:** {processing_time}ms\n"
+
+    if requester_info:
+        header += f"**Requested by:** {requester_info}\n"
+
+    header += "\n"
+
     markup = generate_navigation(page, total_pages)
-    return f"Total Hits: {total_hits}\n{text}", markup
+    return f"{header}{text}", markup
+
+
+def get_requester_info(message: types.Message) -> str:
+    """Get formatted requester information for group searches."""
+    if message.chat.type == enums.ChatType.PRIVATE:
+        return None
+
+    user = message.from_user
+    if not user:
+        return "Unknown"
+
+    name = user.first_name or user.username or "User"
+    username = f"@{user.username}" if user.username else f"ID:{user.id}"
+    return f"{name} ({username})"
 
 
 @app.on_message(filters.command(chat_types) & filters.text & filters.incoming)
-@private_use
+@require_access
 def type_search_handler(client: "Client", message: "types.Message"):
     parts = message.text.split(maxsplit=2)
     chat_type = parts[0][1:].upper()
@@ -181,17 +318,22 @@ def type_search_handler(client: "Client", message: "types.Message"):
 
     refined_text = f"-t={chat_type} {user_filter} {keyword}"
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    text, markup = parse_and_search(refined_text)
+
+    requester_info = get_requester_info(message)
+    text, markup = parse_and_search(refined_text, requester_info=requester_info)
     message.reply_text(
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
 
 
 @app.on_message(filters.text & filters.incoming)
-@private_use
+@require_access
 def search_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    text, markup = parse_and_search(message.text)
+
+    requester_info = get_requester_info(message)
+    text, markup = parse_and_search(message.text, requester_info=requester_info)
+
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
         file = BytesIO(text.encode())
