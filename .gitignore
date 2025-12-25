@@ -151,3 +151,19 @@ privacy_data.json
 sync_progress.json
 sync.ini
 sync.ini.backup
+
+# SearchGram Engine - Security sensitive files
+searchgram-engine/.env
+searchgram-engine/ssl/
+searchgram-engine/logs/
+searchgram-engine/certbot/
+searchgram-engine/fail2ban/
+.env
+.env.*
+!.env.example
+
+# Cloudflare tunnel credentials
+.cloudflared/
+*.pem
+*.key
+*.crt
