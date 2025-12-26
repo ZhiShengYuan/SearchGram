@@ -15,6 +15,8 @@ import (
 	"github.com/zhishengyuan/searchgram-engine/engines"
 	"github.com/zhishengyuan/searchgram-engine/handlers"
 	"github.com/zhishengyuan/searchgram-engine/middleware"
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 func main() {
@@ -97,10 +99,15 @@ func main() {
 		})
 	})
 
-	// Create HTTP server
+	// Create HTTP/2 handler with h2c (HTTP/2 Cleartext) support
+	// This allows HTTP/2 over plain HTTP connections without TLS
+	h2s := &http2.Server{}
+	h2cHandler := h2c.NewHandler(router, h2s)
+
+	// Create HTTP server with HTTP/2 support
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      router,
+		Handler:      h2cHandler,
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
@@ -108,10 +115,11 @@ func main() {
 	// Start server in goroutine
 	go func() {
 		log.WithFields(log.Fields{
-			"host":   cfg.Server.Host,
-			"port":   cfg.Server.Port,
-			"engine": cfg.SearchEngine.Type,
-		}).Info("Starting SearchGram Search Engine")
+			"host":     cfg.Server.Host,
+			"port":     cfg.Server.Port,
+			"engine":   cfg.SearchEngine.Type,
+			"http2":    true,
+		}).Info("Starting SearchGram Search Engine with HTTP/2 support")
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.WithError(err).Fatal("Failed to start server")

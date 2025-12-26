@@ -10,24 +10,23 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-import requests
-from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+import httpx
 
 from searchgram.engine import BasicSearchEngine
 
 
 class HTTPSearchEngine(BasicSearchEngine):
     """
-    HTTP client adapter for Go-based search service.
+    HTTP/2 client adapter for Go-based search service.
 
     This adapter implements the BasicSearchEngine interface but delegates
-    all operations to a remote Go service via HTTP REST API.
+    all operations to a remote Go service via HTTP REST API with HTTP/2 support
+    and connection pooling (remux).
     """
 
     def __init__(self, base_url: str, api_key: Optional[str] = None, timeout: int = 30, max_retries: int = 3):
         """
-        Initialize HTTP search engine client.
+        Initialize HTTP/2 search engine client with connection pooling.
 
         Args:
             base_url: Base URL of the Go search service (e.g., "http://searchgram-engine:8080")
@@ -38,58 +37,78 @@ class HTTPSearchEngine(BasicSearchEngine):
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.timeout = timeout
+        self.max_retries = max_retries
 
-        # Create session with retry logic
-        self.session = requests.Session()
-
-        retry_strategy = Retry(
-            total=max_retries,
-            backoff_factor=1,
-            status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
-        )
-
-        adapter = HTTPAdapter(max_retries=retry_strategy)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
-
-        # Set headers
-        self.session.headers.update({
+        # Prepare headers
+        headers = {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-        })
+        }
 
         if self.api_key:
-            self.session.headers.update({
-                'X-API-Key': self.api_key
-            })
+            headers['X-API-Key'] = self.api_key
 
-        logging.info(f"HTTP search engine initialized: {base_url}")
+        # Create httpx client with HTTP/2 support and connection pooling
+        # limits control connection pooling behavior
+        limits = httpx.Limits(
+            max_keepalive_connections=20,  # Keep up to 20 idle connections alive
+            max_connections=100,            # Maximum total connections
+            keepalive_expiry=30.0,         # Keep connections alive for 30 seconds
+        )
+
+        # Transport with HTTP/2 enabled
+        transport = httpx.HTTPTransport(
+            http2=True,                    # Enable HTTP/2
+            retries=max_retries,           # Retry failed requests
+        )
+
+        # Create persistent client with HTTP/2 and connection pooling
+        self.client = httpx.Client(
+            http2=True,                    # Enable HTTP/2
+            timeout=httpx.Timeout(timeout),
+            limits=limits,
+            transport=transport,
+            headers=headers,
+            follow_redirects=True,
+        )
+
+        logging.info(f"HTTP/2 search engine initialized: {base_url} (connection pooling enabled)")
 
         # Verify connectivity
         self._verify_connection()
 
+    def __del__(self):
+        """Cleanup: close the HTTP client and connections."""
+        if hasattr(self, 'client'):
+            try:
+                self.client.close()
+            except Exception:
+                pass
+
     def _verify_connection(self):
         """Verify connection to the Go service."""
         try:
-            response = self.session.get(
-                f"{self.base_url}/health",
-                timeout=self.timeout
-            )
+            response = self.client.get(f"{self.base_url}/health")
             response.raise_for_status()
-            logging.info("Successfully connected to search service")
-        except requests.RequestException as e:
+
+            # Log HTTP version for verification
+            http_version = getattr(response, 'http_version', 'unknown')
+            if http_version == 'HTTP/2':
+                logging.info(f"Successfully connected to search service with HTTP/2 🚀")
+            else:
+                logging.info(f"Successfully connected to search service ({http_version})")
+        except httpx.HTTPError as e:
             logging.error(f"Failed to connect to search service: {e}")
             raise ConnectionError(f"Cannot connect to search service at {self.base_url}: {e}")
 
     def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """
-        Make an HTTP request to the Go service.
+        Make an HTTP/2 request to the Go service with automatic retries.
 
         Args:
             method: HTTP method (GET, POST, DELETE, etc.)
             endpoint: API endpoint (e.g., "/api/v1/search")
-            **kwargs: Additional arguments for requests
+            **kwargs: Additional arguments for httpx
 
         Returns:
             JSON response as dict
@@ -100,27 +119,26 @@ class HTTPSearchEngine(BasicSearchEngine):
         url = f"{self.base_url}{endpoint}"
 
         try:
-            response = self.session.request(
+            response = self.client.request(
                 method=method,
                 url=url,
-                timeout=self.timeout,
                 **kwargs
             )
             response.raise_for_status()
             return response.json()
 
-        except requests.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             error_msg = f"HTTP error {e.response.status_code}"
             try:
                 error_data = e.response.json()
                 error_msg = error_data.get('message', error_msg)
-            except:
+            except Exception:
                 pass
 
             logging.error(f"HTTP request failed: {error_msg}")
             raise Exception(f"Search service error: {error_msg}")
 
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logging.error(f"Request failed: {e}")
             raise Exception(f"Search service request failed: {e}")
 
