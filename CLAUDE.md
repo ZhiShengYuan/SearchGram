@@ -82,7 +82,6 @@ All configuration is managed by `searchgram/config_loader.py`:
 
 ## Running the Application
 
-**For development/local:**
 ```bash
 # First-time setup: login to client (creates session files)
 python searchgram/client.py
@@ -90,15 +89,6 @@ python searchgram/client.py
 # Run both processes (requires two terminals):
 python searchgram/client.py  # Terminal 1
 python searchgram/bot.py     # Terminal 2
-```
-
-**For Docker:**
-```bash
-# Start all services (includes search engine)
-make up
-
-# Stop services
-make down
 ```
 
 ## Testing
@@ -199,11 +189,6 @@ python searchgram/access_control.py
 
 # Migration: Add timestamps to existing data
 python searchgram/migrations/add_timestamp.py
-
-# Docker operations
-make up          # Start docker-compose services
-make down        # Stop docker-compose services
-make upgrade     # Pull latest code and image, restart
 ```
 
 ## Group Mode Setup

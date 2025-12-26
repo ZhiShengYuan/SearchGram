@@ -151,8 +151,6 @@ Please follow the steps below to install SearchGram on your own server.
 
 This guide will show you how to install SearchGram with our default search engine, MeiliSearch.
 
-**To learn how to use SearchGram in Docker with different search engines (MongoDB, ZincSearch, or Elasticsearch), please refer to the [Docker.md](Docker.md)**
-
 ### Using Elasticsearch
 
 To use Elasticsearch instead of MeiliSearch, set the `ENGINE` environment variable to `elastic`:
@@ -250,7 +248,20 @@ Enter your phone number and log in to the client. You can exit by pressing `Ctrl
 
 ## 5. (optional)Setup sync id
 
-See [here](Docker.md#6-optionalsetup-sync-id)
+Configure chat history sync in `config.json`:
+
+```json
+{
+  "sync": {
+    "chats": [
+      {"id": -1001234567890, "name": "My Group"},
+      {"id": 123456789, "name": "Friend Name"}
+    ]
+  }
+}
+```
+
+The client will automatically sync chat history on startup with resume capability.
 
 ## 6. Run!
 

@@ -274,65 +274,6 @@ Response 200 OK:
 
 ## Deployment
 
-### Docker Compose
-
-```yaml
-version: '3.8'
-
-services:
-  # Go search service
-  searchgram-engine:
-    build: ./searchgram-engine
-    container_name: searchgram-engine
-    ports:
-      - "8080:8080"
-    environment:
-      - ENGINE_TYPE=elasticsearch
-      - ES_HOST=http://elasticsearch:9200
-      - ES_USER=elastic
-      - ES_PASSWORD=changeme
-    depends_on:
-      - elasticsearch
-    networks:
-      - searchgram-network
-
-  # Elasticsearch
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:7.17.0
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=changeme
-    networks:
-      - searchgram-network
-
-  # Python bot (client)
-  searchgram-client:
-    build: .
-    command: python searchgram/client.py
-    volumes:
-      - ./config.json:/app/config.json:ro
-    depends_on:
-      - searchgram-engine
-    networks:
-      - searchgram-network
-
-  # Python bot (search interface)
-  searchgram-bot:
-    build: .
-    command: python searchgram/bot.py
-    volumes:
-      - ./config.json:/app/config.json:ro
-    depends_on:
-      - searchgram-engine
-    networks:
-      - searchgram-network
-
-networks:
-  searchgram-network:
-    driver: bridge
-```
-
 ### Network Security
 
 **LAN Deployment**:
