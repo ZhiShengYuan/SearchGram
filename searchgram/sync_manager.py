@@ -20,6 +20,7 @@ from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired
 from .config_loader import (
     SYNC_BATCH_SIZE,
     SYNC_CHECKPOINT_FILE,
+    SYNC_DELAY_BETWEEN_BATCHES,
     SYNC_ENABLED,
     SYNC_MAX_RETRIES,
     SYNC_RESUME_ON_RESTART,
@@ -253,6 +254,11 @@ class SyncManager:
                             # Reset batch
                             message_batch = []
                             batch_count = 0
+
+                            # Rate limiting: delay between batches to avoid FloodWait
+                            if SYNC_DELAY_BETWEEN_BATCHES > 0:
+                                logging.debug(f"Sleeping {SYNC_DELAY_BETWEEN_BATCHES}s between batches")
+                                time.sleep(SYNC_DELAY_BETWEEN_BATCHES)
                     else:
                         # Fallback to individual insert
                         self.search_engine.upsert(message)
@@ -274,6 +280,11 @@ class SyncManager:
                                 f"({progress.to_dict()['progress_percent']}%)"
                             )
                             batch_count = 0
+
+                            # Rate limiting: delay between batches to avoid FloodWait
+                            if SYNC_DELAY_BETWEEN_BATCHES > 0:
+                                logging.debug(f"Sleeping {SYNC_DELAY_BETWEEN_BATCHES}s between batches")
+                                time.sleep(SYNC_DELAY_BETWEEN_BATCHES)
 
                 except FloodWait as e:
                     # Telegram rate limiting - wait and retry

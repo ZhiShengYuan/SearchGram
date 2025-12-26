@@ -65,6 +65,8 @@
     "retry_on_error": true,
     "max_retries": 3,
     "resume_on_restart": true,
+    "delay_between_batches": 1.0,
+    "_delay_comment": "Delay in seconds between processing batches to avoid Telegram FloodWait rate limits. Recommended: 0.5-2.0 seconds",
     "chats": []
   }
 }
