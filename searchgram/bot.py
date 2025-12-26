@@ -275,7 +275,7 @@ def generate_navigation(page, total_pages):
     return markup
 
 
-def parse_and_search(text, page=1, requester_info=None, chat_id=None) -> Tuple[str, InlineKeyboardMarkup | None]:
+def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_privacy_filter=True) -> Tuple[str, InlineKeyboardMarkup | None]:
     """
     Parse search query and perform search.
 
@@ -284,6 +284,7 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None) -> Tuple[s
         page: Page number
         requester_info: Requester information for display
         chat_id: Optional chat ID to filter results (for group-specific searches)
+        apply_privacy_filter: Whether to filter out blocked users (False for admin in private chat)
 
     Returns:
         Tuple of (result_text, inline_keyboard_markup)
@@ -293,14 +294,16 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None) -> Tuple[s
     user = args.user
     keyword = args.keyword
     mode = args.mode
-    logging.info("Search keyword: %s, type: %s, user: %s, page: %s, mode: %s, chat_id: %s",
-                 keyword, _type, user, page, mode, chat_id)
+    logging.info("Search keyword: %s, type: %s, user: %s, page: %s, mode: %s, chat_id: %s, privacy_filter: %s",
+                 keyword, _type, user, page, mode, chat_id, apply_privacy_filter)
 
     # Perform search with optional chat_id filter
     results = tgdb.search(keyword, _type, user, page, mode, chat_id=chat_id)
 
     # Filter results to exclude blocked users (privacy control)
-    results = privacy_manager.filter_search_results(results)
+    # Skip filtering for admin in private chat to allow full search access
+    if apply_privacy_filter:
+        results = privacy_manager.filter_search_results(results)
 
     text = parse_search_results(results)
     if not text:
@@ -361,9 +364,15 @@ def search_command_handler(client: "Client", message: "types.Message"):
     search_query = parts[1]
     requester_info = get_requester_info(message)
 
+    # Determine privacy filtering: skip for owner in private chat, apply for everyone else
+    user = message.from_user
+    is_private = message.chat.type == enums.ChatType.PRIVATE
+    is_owner = user and access_controller.is_owner(user.id)
+    apply_privacy_filter = not (is_private and is_owner)
+
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    text, markup = parse_and_search(search_query, requester_info=requester_info, chat_id=group_chat_id)
+    text, markup = parse_and_search(search_query, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
 
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
@@ -396,9 +405,16 @@ def type_search_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     requester_info = get_requester_info(message)
+
+    # Determine privacy filtering: skip for owner in private chat, apply for everyone else
+    user = message.from_user
+    is_private = message.chat.type == enums.ChatType.PRIVATE
+    is_owner = user and access_controller.is_owner(user.id)
+    apply_privacy_filter = not (is_private and is_owner)
+
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id)
+    text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
     message.reply_text(
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
@@ -410,9 +426,16 @@ def search_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     requester_info = get_requester_info(message)
+
+    # Determine privacy filtering: skip for owner in private chat, apply for everyone else
+    user = message.from_user
+    is_private = message.chat.type == enums.ChatType.PRIVATE
+    is_owner = user and access_controller.is_owner(user.id)
+    apply_privacy_filter = not (is_private and is_owner)
+
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    text, markup = parse_and_search(message.text, requester_info=requester_info, chat_id=group_chat_id)
+    text, markup = parse_and_search(message.text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
 
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
@@ -457,9 +480,15 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
         refined_text = user_query
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
+    # Determine privacy filtering: skip for owner in private chat, apply for everyone else
+    user = callback_query.from_user
+    is_private = message.chat.type == enums.ChatType.PRIVATE
+    is_owner = user and access_controller.is_owner(user.id)
+    apply_privacy_filter = not (is_private and is_owner)
+
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id)
+    new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
     message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
 
 
