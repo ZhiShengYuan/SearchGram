@@ -465,8 +465,8 @@ def search_command_handler(client: "Client", message: "types.Message"):
             text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
         )
 
-    # Schedule auto-deletion if message has inline keyboard (pagination)
-    if markup:
+    # Schedule auto-deletion if message has inline keyboard (pagination) and in a group
+    if markup and sent_msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
@@ -503,8 +503,8 @@ def type_search_handler(client: "Client", message: "types.Message"):
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
 
-    # Schedule auto-deletion if message has inline keyboard (pagination)
-    if markup:
+    # Schedule auto-deletion if message has inline keyboard (pagination) and in a group
+    if markup and sent_msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
@@ -537,16 +537,17 @@ def search_handler(client: "Client", message: "types.Message"):
             text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
         )
 
-    # Schedule auto-deletion if message has inline keyboard (pagination)
-    if markup:
+    # Schedule auto-deletion if message has inline keyboard (pagination) and in a group
+    if markup and sent_msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
 @app.on_callback_query(filters.regex(r"n|p"))
 def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
-    # Cancel auto-deletion when user interacts with the message
+    # Cancel auto-deletion when user interacts with the message (groups only)
     message = callback_query.message
-    cancel_message_deletion(message.chat.id, message.id)
+    if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+        cancel_message_deletion(message.chat.id, message.id)
 
     call_data = callback_query.data.split("|")
     direction, page = call_data[0], int(call_data[1])
@@ -586,8 +587,8 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
     new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
     message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
 
-    # Reschedule auto-deletion for the updated message (reset 120s timer)
-    if new_markup:
+    # Reschedule auto-deletion for the updated message (reset 120s timer) in groups only
+    if new_markup and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         asyncio.create_task(schedule_message_deletion(client, message.chat.id, message.id))
 
 
