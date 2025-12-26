@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 from pyrogram import Client
 from pyrogram.errors import FloodWait, ChannelPrivate, ChatAdminRequired
 
-from config_loader import (
+from .config_loader import (
     SYNC_BATCH_SIZE,
     SYNC_CHECKPOINT_FILE,
     SYNC_ENABLED,

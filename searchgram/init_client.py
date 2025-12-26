@@ -13,7 +13,7 @@ import urllib.request
 
 from pyrogram import Client
 
-from config import APP_HASH, APP_ID, PROXY, IPv6
+from .config_loader import APP_HASH, APP_ID, PROXY, IPv6
 
 
 def get_client(token=None):

@@ -14,11 +14,11 @@ import time
 import fakeredis
 from pyrogram import Client, filters, types
 
-from __init__ import SearchEngine
-from config_loader import BOT_ID, SYNC_ENABLED, get_config
-from init_client import get_client
-from sync_manager import SyncManager
-from utils import setup_logger
+from . import SearchEngine
+from .config_loader import BOT_ID, SYNC_ENABLED, get_config
+from .init_client import get_client
+from .sync_manager import SyncManager
+from .utils import setup_logger
 
 setup_logger()
 

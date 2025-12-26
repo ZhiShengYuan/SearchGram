@@ -13,7 +13,7 @@ import threading
 from datetime import datetime
 from typing import List, Set
 
-from config_loader import PRIVACY_STORAGE
+from .config_loader import PRIVACY_STORAGE
 
 
 class PrivacyManager:

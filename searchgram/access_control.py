@@ -12,7 +12,7 @@ from typing import Callable
 
 from pyrogram import Client, enums, types
 
-from config_loader import ALLOWED_GROUPS, ALLOWED_USERS, BOT_MODE, OWNER_ID
+from .config_loader import ALLOWED_GROUPS, ALLOWED_USERS, BOT_MODE, OWNER_ID
 
 
 class AccessController:
