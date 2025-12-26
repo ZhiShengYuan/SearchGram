@@ -51,14 +51,18 @@ def help_handler(client: "Client", message: "types.Message"):
     help_text = f"""
 **SearchGram Help** 👋 {user_name}
 
+**🔍 Search Commands:**
+- **In groups**: `/search <query>` - Search messages in this group
+- **In private**: Send any text or use `/search <query>`
+- **Type shortcuts**: `/private [username] keyword`
+
 **🔍 Search Syntax:**
-1. **Global search**: Send any message to search all chats
+1. **Global search**: `keyword` or `/search keyword`
 2. **Chat type search**: `-t=GROUP keyword`
    - Supported types: {', '.join(chat_types)}
 3. **User search**: `-u=user_id|username keyword`
 4. **Exact match**: `-m=e keyword` or `"keyword"`
 5. **Combined**: `-t=GROUP -u=username keyword`
-6. **Type shortcuts**: `/private [username] keyword`
 
 **🔐 Privacy Commands:**
 - `/block_me` - Opt-out: Your messages won't appear in anyone's search
@@ -332,6 +336,45 @@ def get_requester_info(message: types.Message) -> str:
     name = user.first_name or user.username or "User"
     username = f"@{user.username}" if user.username else f"ID:{user.id}"
     return f"{name} ({username})"
+
+
+@app.on_message(filters.command(["search"]) & filters.text & filters.incoming)
+@require_access
+def search_command_handler(client: "Client", message: "types.Message"):
+    """Handle /search command in groups and private chats."""
+    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    # Extract search query after /search command
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        message.reply_text(
+            "Usage: `/search <query>`\n\nExamples:\n"
+            "- `/search keyword`\n"
+            "- `/search -t=GROUP keyword`\n"
+            "- `/search -u=username keyword`\n"
+            "- `/search \"exact phrase\"`",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        return
+
+    search_query = parts[1]
+    requester_info = get_requester_info(message)
+
+    # In groups, filter search results to only this group
+    group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
+    text, markup = parse_and_search(search_query, requester_info=requester_info, chat_id=group_chat_id)
+
+    if len(text) > 4096:
+        logging.warning("Message too long, sending as file instead")
+        file = BytesIO(text.encode())
+        file.name = "search_result.txt"
+        message.reply_text("Your search result is too long, sending as file instead", quote=True)
+        message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
+    else:
+        message.reply_text(
+            text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
+        )
 
 
 @app.on_message(filters.command(chat_types) & filters.text & filters.incoming)
