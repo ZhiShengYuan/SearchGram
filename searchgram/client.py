@@ -40,10 +40,17 @@ stats = {
 
 @app.on_message((filters.outgoing | filters.incoming))
 def message_handler(client: "Client", message: "types.Message"):
-    # Check if message is from the bot itself - skip to prevent circular indexing
-    if message.chat.id == BOT_ID:
+    # Check if sender is the bot itself - skip to prevent circular indexing
+    # Use from_user.id to check sender, not chat.id (which could be a group)
+    if message.from_user and message.from_user.id == BOT_ID:
         stats["bot_skipped"] += 1
-        logging.debug("Skipping bot message: %s-%s (total skipped: %d)", message.chat.id, message.id, stats["bot_skipped"])
+        logging.debug("Skipping bot message from user %s in chat %s-%s (total skipped: %d)",
+                     message.from_user.id, message.chat.id, message.id, stats["bot_skipped"])
+        return
+
+    # Skip service messages (no from_user)
+    if not message.from_user:
+        logging.debug("Skipping service message: %s-%s", message.chat.id, message.id)
         return
 
     logging.info("Adding new message: %s-%s", message.chat.id, message.id)
@@ -62,9 +69,15 @@ def message_handler(client: "Client", message: "types.Message"):
 
 @app.on_edited_message()
 def message_edit_handler(client: "Client", message: "types.Message"):
-    # Check if message is from the bot itself - skip to prevent circular indexing
-    if message.chat.id == BOT_ID:
-        logging.debug("Skipping bot edited message: %s-%s", message.chat.id, message.id)
+    # Check if sender is the bot itself - skip to prevent circular indexing
+    if message.from_user and message.from_user.id == BOT_ID:
+        logging.debug("Skipping bot edited message from user %s in chat %s-%s",
+                     message.from_user.id, message.chat.id, message.id)
+        return
+
+    # Skip service messages (no from_user)
+    if not message.from_user:
+        logging.debug("Skipping edited service message: %s-%s", message.chat.id, message.id)
         return
 
     logging.info("Editing old message: %s-%s", message.chat.id, message.id)
