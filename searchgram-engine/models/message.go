@@ -30,12 +30,13 @@ type Message struct {
 
 // SearchRequest represents a search query
 type SearchRequest struct {
-	Keyword      string  `json:"keyword"`                // Search keyword
-	ChatType     string  `json:"chat_type,omitempty"`    // Filter by chat type
-	Username     string  `json:"username,omitempty"`     // Filter by username
-	Page         int     `json:"page"`                   // Page number (1-based)
-	PageSize     int     `json:"page_size"`              // Results per page
-	ExactMatch   bool    `json:"exact_match"`            // Exact vs fuzzy matching
+	Keyword      string  `json:"keyword"`                 // Search keyword
+	ChatType     string  `json:"chat_type,omitempty"`     // Filter by chat type
+	Username     string  `json:"username,omitempty"`      // Filter by username
+	ChatID       *int64  `json:"chat_id,omitempty"`       // Filter by chat ID (for group searches)
+	Page         int     `json:"page"`                    // Page number (1-based)
+	PageSize     int     `json:"page_size"`               // Results per page
+	ExactMatch   bool    `json:"exact_match"`             // Exact vs fuzzy matching
 	BlockedUsers []int64 `json:"blocked_users,omitempty"` // User IDs to exclude
 }
 

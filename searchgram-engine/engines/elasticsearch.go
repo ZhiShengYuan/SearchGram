@@ -294,6 +294,12 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 		boolQuery.Filter(usernameQuery)
 	}
 
+	// Filter by chat ID (for group-specific searches)
+	if req.ChatID != nil {
+		chatIDFilter := elastic.NewTermQuery("chat.id", *req.ChatID)
+		boolQuery.Filter(chatIDFilter)
+	}
+
 	// Exclude blocked users
 	if len(req.BlockedUsers) > 0 {
 		for _, userID := range req.BlockedUsers {
