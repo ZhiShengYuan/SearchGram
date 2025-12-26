@@ -230,7 +230,7 @@ def unix_to_rfc3339_utc8(timestamp: int) -> str:
 
 def parse_search_results(data: "dict"):
     result = ""
-    hits = data["hits"]
+    hits = data.get("hits") or []
 
     for hit in hits:
         text = hit.get("text") or hit.get("caption")

@@ -267,12 +267,13 @@ class HTTPSearchEngine(BasicSearchEngine):
         result = self._make_request("POST", "/api/v1/search", json=payload)
 
         # Transform response to match expected format
+        # Handle None values from API (normalize nulls to empty lists/zeros)
         return {
-            "hits": result.get("hits", []),
-            "totalHits": result.get("total_hits", 0),
-            "totalPages": result.get("total_pages", 0),
-            "page": result.get("page", 1),
-            "hitsPerPage": result.get("hits_per_page", 10),
+            "hits": result.get("hits") or [],
+            "totalHits": result.get("total_hits") or 0,
+            "totalPages": result.get("total_pages") or 0,
+            "page": result.get("page") or 1,
+            "hitsPerPage": result.get("hits_per_page") or 10,
         }
 
     def ping(self) -> Dict[str, Any]:
