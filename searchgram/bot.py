@@ -220,7 +220,14 @@ def parse_search_results(data: "dict"):
         message_id = hit.get("message_id")  # Get actual message ID, not composite ID
         chat_id = abs(hit["chat"]["id"])  # Get absolute value for private link construction
         # https://corefork.telegram.org/api/links
-        deep_link = f"tg://resolve?domain={username}" if username else f"tg://user?id={from_id}"
+        # Use chat username if available, otherwise fall back to from_id (if available), or chat_id
+        if username:
+            deep_link = f"tg://resolve?domain={username}"
+        elif from_id:
+            deep_link = f"tg://user?id={from_id}"
+        else:
+            # For channels/groups without username and no from_user, use chat link
+            deep_link = f"tg://privatepost?channel={chat_id}&post={message_id}"
         text_link = f"https://t.me/{username}/{message_id}" if username else f"https://t.me/c/{chat_id}/{message_id}"
 
         if outgoing:
