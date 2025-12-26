@@ -35,6 +35,9 @@ parser.add_argument("-t", "--type", help="the type of message", default=None)
 parser.add_argument("-u", "--user", help="the user who sent the message", default=None)
 parser.add_argument("-m", "--mode", help="match mode, e: exact match, other value is fuzzy search", default=None)
 
+# Pagination limits
+MAX_PAGE = 100  # Maximum allowed page number to prevent abuse
+
 # Auto-delete mechanism: Track deletion tasks for messages with inline keyboards
 # Key: (chat_id, message_id), Value: asyncio.Task
 deletion_tasks: Dict[Tuple[int, int], asyncio.Task] = {}
@@ -336,19 +339,32 @@ def parse_search_results(data: "dict"):
 
 def generate_navigation(page, total_pages):
     if total_pages != 1:
+        # Check if we're at the max page limit
+        at_max_page = page >= MAX_PAGE
+        # Check if next page would exceed max
+        next_page_available = page < total_pages and not at_max_page
+
         if page == 1:
-            # first page, only show next button
-            next_button = InlineKeyboardButton("Next Page", callback_data=f"n|{page}")
-            markup_content = [next_button]
-        elif page == total_pages:
-            # last page, only show previous button
+            # first page, only show next button if available
+            if next_page_available:
+                next_button = InlineKeyboardButton("Next Page", callback_data=f"n|{page}")
+                markup_content = [next_button]
+            else:
+                # No navigation needed if only one accessible page
+                return None
+        elif page == total_pages or at_max_page:
+            # last page or max page reached, only show previous button
             previous_button = InlineKeyboardButton("Previous Page", callback_data=f"p|{page}")
             markup_content = [previous_button]
         else:
-            # middle page, show both previous and next button
-            next_button = InlineKeyboardButton("Next Page", callback_data=f"n|{page}")
+            # middle page, show both previous and next button (if next is available)
             previous_button = InlineKeyboardButton("Previous Page", callback_data=f"p|{page}")
-            markup_content = [previous_button, next_button]
+            if next_page_available:
+                next_button = InlineKeyboardButton("Next Page", callback_data=f"n|{page}")
+                markup_content = [previous_button, next_button]
+            else:
+                # Only show previous if at limit
+                markup_content = [previous_button]
         markup = InlineKeyboardMarkup([markup_content])
     else:
         markup = None
@@ -369,6 +385,12 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
     Returns:
         Tuple of (result_text, inline_keyboard_markup)
     """
+    # Validate page number
+    if page < 1:
+        return "Invalid page number. Page must be greater than 0.", None
+    if page > MAX_PAGE:
+        return f"Page number too high. Maximum allowed page is {MAX_PAGE}.", None
+
     args = parser.parse_args(text.split())
     _type = args.type
     user = args.user
@@ -396,7 +418,12 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
 
     # Add header with stats
     header = f"🔍 **Search Results**\n"
-    header += f"**Hits:** {total_hits} | **Page:** {page}/{total_pages} | **Time:** {processing_time}ms\n"
+    # Cap displayed total_pages to MAX_PAGE
+    displayed_total = min(total_pages, MAX_PAGE)
+    header += f"**Hits:** {total_hits} | **Page:** {page}/{displayed_total}"
+    if total_pages > MAX_PAGE:
+        header += f" (capped at {MAX_PAGE})"
+    header += f" | **Time:** {processing_time}ms\n"
 
     if requester_info:
         header += f"**Requested by:** {requester_info}\n"
@@ -423,14 +450,14 @@ def get_requester_info(message: types.Message) -> str:
 
 @app.on_message(filters.command(["search"]) & filters.text & filters.incoming)
 @require_access
-def search_command_handler(client: "Client", message: "types.Message"):
+async def search_command_handler(client: "Client", message: "types.Message"):
     """Handle /search command in groups and private chats."""
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     # Extract search query after /search command
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2:
-        message.reply_text(
+        await message.reply_text(
             "Usage: `/search <query>`\n\nExamples:\n"
             "- `/search keyword`\n"
             "- `/search -t=GROUP keyword`\n"
@@ -458,10 +485,10 @@ def search_command_handler(client: "Client", message: "types.Message"):
         logging.warning("Message too long, sending as file instead")
         file = BytesIO(text.encode())
         file.name = "search_result.txt"
-        message.reply_text("Your search result is too long, sending as file instead", quote=True)
-        sent_msg = message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
+        await message.reply_text("Your search result is too long, sending as file instead", quote=True)
+        sent_msg = await message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
     else:
-        sent_msg = message.reply_text(
+        sent_msg = await message.reply_text(
             text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
         )
 
@@ -472,11 +499,11 @@ def search_command_handler(client: "Client", message: "types.Message"):
 
 @app.on_message(filters.command(chat_types) & filters.text & filters.incoming)
 @require_access
-def type_search_handler(client: "Client", message: "types.Message"):
+async def type_search_handler(client: "Client", message: "types.Message"):
     parts = message.text.split(maxsplit=2)
     chat_type = parts[0][1:].upper()
     if len(parts) == 1:
-        message.reply_text(f"/{chat_type} [username] keyword", quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+        await message.reply_text(f"/{chat_type} [username] keyword", quote=True, parse_mode=enums.ParseMode.MARKDOWN)
         return
     if len(parts) > 2:
         user_filter = f"-u={parts[1]}"
@@ -486,7 +513,7 @@ def type_search_handler(client: "Client", message: "types.Message"):
         keyword = parts[1]
 
     refined_text = f"-t={chat_type} {user_filter} {keyword}"
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     requester_info = get_requester_info(message)
 
@@ -499,7 +526,7 @@ def type_search_handler(client: "Client", message: "types.Message"):
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
-    sent_msg = message.reply_text(
+    sent_msg = await message.reply_text(
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
 
@@ -510,8 +537,8 @@ def type_search_handler(client: "Client", message: "types.Message"):
 
 @app.on_message(filters.text & filters.incoming)
 @require_access
-def search_handler(client: "Client", message: "types.Message"):
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+async def search_handler(client: "Client", message: "types.Message"):
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     requester_info = get_requester_info(message)
 
@@ -529,11 +556,11 @@ def search_handler(client: "Client", message: "types.Message"):
         logging.warning("Message too long, sending as file instead")
         file = BytesIO(text.encode())
         file.name = "search_result.txt"
-        message.reply_text("Your search result is too long, sending as file instead", quote=True)
-        sent_msg = message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
+        await message.reply_text("Your search result is too long, sending as file instead", quote=True)
+        sent_msg = await message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
         file.close()
     else:
-        sent_msg = message.reply_text(
+        sent_msg = await message.reply_text(
             text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
         )
 
@@ -543,7 +570,7 @@ def search_handler(client: "Client", message: "types.Message"):
 
 
 @app.on_callback_query(filters.regex(r"n|p"))
-def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
+async def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
     # Cancel auto-deletion when user interacts with the message (groups only)
     message = callback_query.message
     if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
@@ -574,7 +601,7 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
         refined_text = parts[0]
     else:
         refined_text = user_query
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     # Determine privacy filtering: skip for owner in private chat, apply for everyone else
     user = callback_query.from_user
@@ -585,7 +612,7 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
-    message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
+    await message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
 
     # Reschedule auto-deletion for the updated message (reset 120s timer) in groups only
     if new_markup and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:

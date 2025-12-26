@@ -6,6 +6,8 @@
 
 __author__ = "Benny <benny.think@gmail.com>"
 
+import asyncio
+import inspect
 import logging
 from functools import wraps
 from typing import Callable
@@ -109,14 +111,46 @@ class AccessController:
     def require_access(self, func: Callable) -> Callable:
         """
         Decorator to enforce access control on bot commands.
+        Supports both sync and async handlers.
 
         Usage:
             @access_controller.require_access
             def my_handler(client, message):
                 ...
+
+            @access_controller.require_access
+            async def my_async_handler(client, message):
+                ...
         """
         @wraps(func)
-        def wrapper(client: Client, message: types.Message):
+        async def async_wrapper(client: Client, message: types.Message):
+            has_access, reason = self.check_access(message)
+
+            if not has_access:
+                logging.warning(
+                    "Access denied for user %s in chat %s: %s",
+                    message.from_user.id if message.from_user else "unknown",
+                    message.chat.id,
+                    reason
+                )
+                # Only send error message in private chats to avoid spam
+                if message.chat.type == enums.ChatType.PRIVATE:
+                    await client.send_message(message.chat.id, f"❌ {reason}")
+                return
+
+            logging.info(
+                "Access granted for user %s in chat %s (reason: %s)",
+                message.from_user.id if message.from_user else "unknown",
+                message.chat.id,
+                reason
+            )
+            if inspect.iscoroutinefunction(func):
+                return await func(client, message)
+            else:
+                return func(client, message)
+
+        @wraps(func)
+        def sync_wrapper(client: Client, message: types.Message):
             has_access, reason = self.check_access(message)
 
             if not has_access:
@@ -139,19 +173,43 @@ class AccessController:
             )
             return func(client, message)
 
-        return wrapper
+        # Return async wrapper if func is async, otherwise return sync wrapper
+        if inspect.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
 
     def require_owner(self, func: Callable) -> Callable:
         """
         Decorator to require owner access (for admin commands).
+        Supports both sync and async handlers.
 
         Usage:
             @access_controller.require_owner
             def admin_command(client, message):
                 ...
+
+            @access_controller.require_owner
+            async def async_admin_command(client, message):
+                ...
         """
         @wraps(func)
-        def wrapper(client: Client, message: types.Message):
+        async def async_wrapper(client: Client, message: types.Message):
+            user_id = message.from_user.id if message.from_user else None
+
+            if not user_id or not self.is_owner(user_id):
+                logging.warning("Owner-only command attempted by user %s", user_id)
+                if message.chat.type == enums.ChatType.PRIVATE:
+                    await client.send_message(message.chat.id, "❌ This command is only available to the bot owner.")
+                return
+
+            if inspect.iscoroutinefunction(func):
+                return await func(client, message)
+            else:
+                return func(client, message)
+
+        @wraps(func)
+        def sync_wrapper(client: Client, message: types.Message):
             user_id = message.from_user.id if message.from_user else None
 
             if not user_id or not self.is_owner(user_id):
@@ -162,7 +220,11 @@ class AccessController:
 
             return func(client, message)
 
-        return wrapper
+        # Return async wrapper if func is async, otherwise return sync wrapper
+        if inspect.iscoroutinefunction(func):
+            return async_wrapper
+        else:
+            return sync_wrapper
 
 
 # Global access controller instance
