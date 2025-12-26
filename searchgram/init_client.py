@@ -9,11 +9,20 @@ __author__ = "Benny <benny.think@gmail.com>"
 
 import contextlib
 import json
+import os
 import urllib.request
+from pathlib import Path
 
 from pyrogram import Client
 
 from .config_loader import APP_HASH, APP_ID, PROXY, IPv6
+
+# Get the directory where this file is located (searchgram/)
+_PACKAGE_DIR = Path(__file__).parent
+_SESSION_DIR = _PACKAGE_DIR / "session"
+
+# Ensure session directory exists
+_SESSION_DIR.mkdir(exist_ok=True)
 
 
 def get_client(token=None):
@@ -22,10 +31,14 @@ def get_client(token=None):
     else:
         proxy = PROXY
     app_device = dict(app_version=f"SearchGram/{get_revision()}", device_model="Firefox", proxy=proxy)
+
+    # Use absolute paths for session files
     if token:
-        return Client("session/bot", APP_ID, APP_HASH, bot_token=token, ipv6=IPv6, **app_device)
+        session_path = str(_SESSION_DIR / "bot")
+        return Client(session_path, APP_ID, APP_HASH, bot_token=token, ipv6=IPv6, **app_device)
     else:
-        return Client("session/client", APP_ID, APP_HASH, ipv6=IPv6, **app_device)
+        session_path = str(_SESSION_DIR / "client")
+        return Client(session_path, APP_ID, APP_HASH, ipv6=IPv6, **app_device)
 
 
 def get_revision():
