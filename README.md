@@ -179,7 +179,21 @@ Elasticsearch provides the best search quality with:
 * Obtain your bot token by contacting https://t.me/BotFather.
 * Obtain your user ID by contacting https://t.me/blog_update_bot.
 
-## 2. Modify environment file
+## 2. Install dependencies
+
+Install all required Python packages (including HTTP/2 support):
+
+```bash
+# Quick install using the installation script
+./install_deps.sh
+
+# Or manually with pip
+pip3 install -r requirements.txt
+```
+
+**New in latest version**: HTTP/2 support with connection pooling for better performance when using the Go search service. See [HTTP2_IMPLEMENTATION.md](HTTP2_IMPLEMENTATION.md) for details.
+
+## 3. Modify environment file
 
 Use your favorite editor to modify `config.py`, example:
 
@@ -220,7 +234,7 @@ ALLOWED_USERS = [123456789]  # Additional authorized users
 
 Then add the bot to your group and anyone in the group can search (with privacy controls).
 
-## 3. Login to client
+## 4. Login to client
 
 Open a terminal (such as cmd or iTerm), navigate to the directory where you have saved the code, and then:
 
@@ -230,11 +244,11 @@ python client.py
 
 Enter your phone number and log in to the client. You can exit by pressing `Ctrl + C`.
 
-## 4. (optional)Setup sync id
+## 5. (optional)Setup sync id
 
 See [here](Docker.md#6-optionalsetup-sync-id)
 
-## 5. Run!
+## 6. Run!
 
 Open two terminals and run the following commands in each terminal:
 
