@@ -211,16 +211,17 @@ def parse_search_results(data: "dict"):
             continue
         logging.info("Hit: %s", hit)
         chat_username = get_display_name(hit["chat"])
-        from_username = get_display_name(hit.get("from_user") or hit["sender_chat"])
+        from_username = get_display_name(hit.get("from_user") or hit.get("sender_chat", {}))
         date = hit["date"]
-        outgoing = hit["outgoing"]
+        outgoing = hit.get("outgoing", False)  # Default to False if not present
         username = hit["chat"].get("username")
         from_ = hit.get("from_user", {})
         from_id = from_.get("id")
-        message_id = hit["id"]
+        message_id = hit.get("message_id")  # Get actual message ID, not composite ID
+        chat_id = abs(hit["chat"]["id"])  # Get absolute value for private link construction
         # https://corefork.telegram.org/api/links
         deep_link = f"tg://resolve?domain={username}" if username else f"tg://user?id={from_id}"
-        text_link = f"https://t.me/{username}/{message_id}" if username else f"https://t.me/c/{from_id}/{message_id}"
+        text_link = f"https://t.me/{username}/{message_id}" if username else f"https://t.me/c/{chat_id}/{message_id}"
 
         if outgoing:
             result += f"{from_username}-> [{chat_username}]({deep_link}) on {date}: \n`{text}` [👀]({text_link})\n\n"
