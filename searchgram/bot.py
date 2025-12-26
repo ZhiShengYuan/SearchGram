@@ -218,7 +218,14 @@ def parse_search_results(data: "dict"):
         from_ = hit.get("from_user", {})
         from_id = from_.get("id")
         message_id = hit.get("message_id")  # Get actual message ID, not composite ID
-        chat_id = abs(hit["chat"]["id"])  # Get absolute value for private link construction
+        raw_chat_id = hit["chat"]["id"]
+        # For supergroups/channels, chat_id is like -1001026262135
+        # For private links, we need to remove the -100 prefix to get 1026262135
+        if raw_chat_id < 0:
+            # Remove -100 prefix for supergroups/channels: -1001234567890 -> 1234567890
+            chat_id = abs(raw_chat_id) - 1000000000000 if abs(raw_chat_id) > 1000000000000 else abs(raw_chat_id)
+        else:
+            chat_id = raw_chat_id
         # https://corefork.telegram.org/api/links
         # Use chat username if available, otherwise fall back to from_id (if available), or chat_id
         if username:
@@ -231,9 +238,15 @@ def parse_search_results(data: "dict"):
         text_link = f"https://t.me/{username}/{message_id}" if username else f"https://t.me/c/{chat_id}/{message_id}"
 
         if outgoing:
-            result += f"{from_username}-> [{chat_username}]({deep_link}) on {date}: \n`{text}` [👀]({text_link})\n\n"
+            result += f"{from_username} -> [{chat_username}]({deep_link}) on {date}: \n`{text}` [👀]({text_link})\n\n"
         else:
-            result += f"[{chat_username}]({deep_link}) -> me on {date}: \n`{text}` [👀]({text_link})\n\n"
+            # For incoming messages, show: sender -> chat (or "-> me" for private chats)
+            if from_username and from_username != chat_username:
+                # Group/channel message: show sender -> chat
+                result += f"{from_username} -> [{chat_username}]({deep_link}) on {date}: \n`{text}` [👀]({text_link})\n\n"
+            else:
+                # Private message: show sender -> me
+                result += f"[{chat_username}]({deep_link}) -> me on {date}: \n`{text}` [👀]({text_link})\n\n"
     return result
 
 
