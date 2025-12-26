@@ -9,6 +9,7 @@ __author__ = "Benny <benny.think@gmail.com>"
 
 import argparse
 import logging
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Tuple
 
@@ -204,6 +205,29 @@ def get_display_name(chat: dict):
         return username
 
 
+def unix_to_rfc3339_utc8(timestamp: int) -> str:
+    """
+    Convert Unix timestamp to RFC3339 format in UTC+8 timezone.
+
+    Args:
+        timestamp: Unix timestamp (seconds since epoch)
+
+    Returns:
+        RFC3339 formatted datetime string in UTC+8
+
+    Example:
+        1766764050 -> "2025-12-26T16:14:10+08:00"
+    """
+    # Define UTC+8 timezone
+    utc8 = timezone(timedelta(hours=8))
+
+    # Convert Unix timestamp to datetime in UTC+8
+    dt = datetime.fromtimestamp(timestamp, tz=utc8)
+
+    # Format as RFC3339
+    return dt.isoformat()
+
+
 def parse_search_results(data: "dict"):
     result = ""
     hits = data["hits"]
@@ -216,7 +240,8 @@ def parse_search_results(data: "dict"):
         logging.info("Hit: %s", hit)
         chat_username = get_display_name(hit["chat"])
         from_username = get_display_name(hit.get("from_user") or hit.get("sender_chat", {}))
-        date = hit["date"]
+        unix_timestamp = hit["date"]
+        date = unix_to_rfc3339_utc8(unix_timestamp)
         outgoing = hit.get("outgoing", False)  # Default to False if not present
         username = hit["chat"].get("username")
         from_ = hit.get("from_user", {})
