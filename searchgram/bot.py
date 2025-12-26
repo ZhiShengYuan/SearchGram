@@ -8,10 +8,11 @@
 __author__ = "Benny <benny.think@gmail.com>"
 
 import argparse
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from typing import Tuple
+from typing import Dict, Tuple
 
 from pyrogram import Client, enums, filters, types
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -33,6 +34,60 @@ parser.add_argument("keyword", help="the keyword to be searched")
 parser.add_argument("-t", "--type", help="the type of message", default=None)
 parser.add_argument("-u", "--user", help="the user who sent the message", default=None)
 parser.add_argument("-m", "--mode", help="match mode, e: exact match, other value is fuzzy search", default=None)
+
+# Auto-delete mechanism: Track deletion tasks for messages with inline keyboards
+# Key: (chat_id, message_id), Value: asyncio.Task
+deletion_tasks: Dict[Tuple[int, int], asyncio.Task] = {}
+
+
+async def schedule_message_deletion(client: Client, chat_id: int, message_id: int, delay: int = 120):
+    """
+    Schedule a message for auto-deletion after a delay if no interaction occurs.
+
+    Args:
+        client: Pyrogram Client instance
+        chat_id: Chat ID where the message was sent
+        message_id: Message ID to delete
+        delay: Delay in seconds before deletion (default: 120)
+    """
+    key = (chat_id, message_id)
+
+    async def delete_message():
+        try:
+            await asyncio.sleep(delay)
+            await client.delete_messages(chat_id, message_id)
+            logging.info(f"Auto-deleted message {message_id} in chat {chat_id} after {delay}s of no interaction")
+        except asyncio.CancelledError:
+            logging.debug(f"Deletion cancelled for message {message_id} in chat {chat_id} (user interacted)")
+        except Exception as e:
+            logging.error(f"Failed to auto-delete message {message_id}: {e}")
+        finally:
+            # Clean up task from dict
+            if key in deletion_tasks:
+                del deletion_tasks[key]
+
+    # Cancel any existing task for this message
+    if key in deletion_tasks:
+        deletion_tasks[key].cancel()
+
+    # Schedule new deletion task
+    task = asyncio.create_task(delete_message())
+    deletion_tasks[key] = task
+
+
+def cancel_message_deletion(chat_id: int, message_id: int):
+    """
+    Cancel a scheduled message deletion (called when user interacts).
+
+    Args:
+        chat_id: Chat ID where the message was sent
+        message_id: Message ID to cancel deletion for
+    """
+    key = (chat_id, message_id)
+    if key in deletion_tasks:
+        deletion_tasks[key].cancel()
+        del deletion_tasks[key]
+        logging.debug(f"Cancelled auto-deletion for message {message_id} in chat {chat_id}")
 
 
 @app.on_message(filters.command(["start"]))
@@ -404,11 +459,15 @@ def search_command_handler(client: "Client", message: "types.Message"):
         file = BytesIO(text.encode())
         file.name = "search_result.txt"
         message.reply_text("Your search result is too long, sending as file instead", quote=True)
-        message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
+        sent_msg = message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
     else:
-        message.reply_text(
+        sent_msg = message.reply_text(
             text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
         )
+
+    # Schedule auto-deletion if message has inline keyboard (pagination)
+    if markup:
+        asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
 @app.on_message(filters.command(chat_types) & filters.text & filters.incoming)
@@ -440,9 +499,13 @@ def type_search_handler(client: "Client", message: "types.Message"):
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
-    message.reply_text(
+    sent_msg = message.reply_text(
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
+
+    # Schedule auto-deletion if message has inline keyboard (pagination)
+    if markup:
+        asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
 @app.on_message(filters.text & filters.incoming)
@@ -467,19 +530,26 @@ def search_handler(client: "Client", message: "types.Message"):
         file = BytesIO(text.encode())
         file.name = "search_result.txt"
         message.reply_text("Your search result is too long, sending as file instead", quote=True)
-        message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
+        sent_msg = message.reply_document(file, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup)
         file.close()
     else:
-        message.reply_text(
+        sent_msg = message.reply_text(
             text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
         )
+
+    # Schedule auto-deletion if message has inline keyboard (pagination)
+    if markup:
+        asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
 @app.on_callback_query(filters.regex(r"n|p"))
 def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
+    # Cancel auto-deletion when user interacts with the message
+    message = callback_query.message
+    cancel_message_deletion(message.chat.id, message.id)
+
     call_data = callback_query.data.split("|")
     direction, page = call_data[0], int(call_data[1])
-    message = callback_query.message
     if direction == "n":
         new_page = page + 1
     elif direction == "p":
@@ -515,6 +585,10 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
     message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
+
+    # Reschedule auto-deletion for the updated message (reset 120s timer)
+    if new_markup:
+        asyncio.create_task(schedule_message_deletion(client, message.chat.id, message.id))
 
 
 if __name__ == "__main__":
