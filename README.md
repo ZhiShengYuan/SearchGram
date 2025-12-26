@@ -239,7 +239,11 @@ Then add the bot to your group and anyone in the group can search (with privacy 
 Open a terminal (such as cmd or iTerm), navigate to the directory where you have saved the code, and then:
 
 ```shell
-python client.py
+# Method 1: Using runner script (recommended)
+python3 run_client.py
+
+# Method 2: As Python module
+python3 -m searchgram.client
 ```
 
 Enter your phone number and log in to the client. You can exit by pressing `Ctrl + C`.
@@ -253,8 +257,13 @@ See [here](Docker.md#6-optionalsetup-sync-id)
 Open two terminals and run the following commands in each terminal:
 
 ```shell
-python client.py
-python bot.py
+# Terminal 1: Run client (userbot)
+python3 run_client.py
+# or: python3 -m searchgram.client
+
+# Terminal 2: Run bot (search interface)
+python3 run_bot.py
+# or: python3 -m searchgram.bot
 ```
 
 ## 6. (Optional) Migration
