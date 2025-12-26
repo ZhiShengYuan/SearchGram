@@ -586,14 +586,19 @@ async def send_method_callback(client: "Client", callback_query: types.CallbackQ
         raise ValueError("Invalid direction")
 
     # find original user query
-    # /private hello
-    # -t=private -u=123 hello
-    # -t=private hello
-    # hello
+    # /search hello           -> hello
+    # /private hello          -> -t=PRIVATE hello
+    # /private username hello -> -t=PRIVATE -u=username hello
+    # -t=private -u=123 hello -> -t=private -u=123 hello
+    # hello                   -> hello
     user_query = message.reply_to_message.text
 
     parts = user_query.split(maxsplit=2)
-    if user_query.startswith("/"):
+    if user_query.startswith("/search "):
+        # Handle /search command: extract query after "/search "
+        refined_text = user_query[8:]  # Remove "/search " prefix
+    elif user_query.startswith("/") and parts[0][1:].lower() in [ct.lower() for ct in chat_types]:
+        # Handle chat type shortcuts like /private, /group, etc.
         user_filter = f"-u={parts[1]}" if len(parts) > 2 else ""
         keyword = parts[2] if len(parts) > 2 else parts[1]
         refined_text = f"-t={parts[0][1:].upper()} {user_filter} {keyword}"
