@@ -213,4 +213,12 @@ Sync checkpoint saved. You can resume anytime!
 if __name__ == "__main__":
     # Start sync in background thread
     threading.Thread(target=sync_history_new, daemon=True).start()
-    app.run()
+
+    try:
+        app.run()
+    finally:
+        # Ensure all buffered messages are flushed before exit
+        logging.info("Client shutting down, flushing remaining messages...")
+        tgdb.flush()
+        tgdb.shutdown()
+        logging.info("All messages flushed, safe to exit")

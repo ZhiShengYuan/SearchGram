@@ -306,6 +306,12 @@ class SyncManager:
                     logging.error(f"Error flushing final batch: {e}")
                     progress.error_count += len(message_batch)
 
+            # Ensure buffered engine flushes all pending messages
+            if hasattr(self.search_engine, 'flush'):
+                logging.info(f"Flushing buffered messages for chat {chat_id}...")
+                self.search_engine.flush()
+                logging.info(f"Buffer flushed for chat {chat_id}")
+
             # Final checkpoint
             if not error_in_batch:
                 progress.status = "completed"

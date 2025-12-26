@@ -10,6 +10,12 @@
   },
   "search_engine": {
     "engine": "http",
+    "batch": {
+      "_comment": "Batch insert settings for improved performance",
+      "enabled": true,
+      "size": 100,
+      "flush_interval": 1.0
+    },
     "http": {
       "base_url": "http://searchgram-engine:8080",
       "api_key": null,

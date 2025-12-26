@@ -162,14 +162,23 @@ class BufferedSearchEngine:
                 self._flush_buffer_unsafe()
 
     def flush(self) -> None:
-        """Manually flush all buffered messages."""
+        """
+        Manually flush all buffered messages.
+
+        This is a blocking operation that ensures all messages are sent
+        to the remote database before returning. Critical for resume capability.
+        """
         if not self.enabled:
             return
 
         with self.lock:
             if len(self.buffer) > 0:
-                logging.info(f"Manual flush requested, flushing {len(self.buffer)} messages")
+                buffer_count = len(self.buffer)
+                logging.info(f"Manual flush requested, flushing {buffer_count} messages")
                 self._flush_buffer_unsafe()
+                logging.info(f"Manual flush completed, {buffer_count} messages sent to database")
+            else:
+                logging.debug("Manual flush requested but buffer is empty")
 
     def shutdown(self) -> None:
         """Shutdown buffered engine and flush remaining messages."""
