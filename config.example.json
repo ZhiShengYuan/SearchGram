@@ -1,4 +1,5 @@
 {
+  "_comment": "SearchGram Configuration File - See CONFIG_REFERENCE.md for detailed documentation of all fields",
   "telegram": {
     "app_id": 123456,
     "app_hash": "your_app_hash_here",
@@ -35,9 +36,18 @@
     }
   },
   "bot": {
+    "_mode_comment": "Mode can be a single string ('private', 'group', 'public') or array (['private', 'group'])",
     "mode": "private",
+    "_mode_examples": {
+      "private_only": "private",
+      "group_only": "group",
+      "multi_mode": ["private", "group"],
+      "public": "public"
+    },
     "allowed_groups": [],
-    "allowed_users": []
+    "_allowed_groups_example": [-1001234567890, -1009876543210],
+    "allowed_users": [],
+    "_allowed_users_example": [123456789, 987654321]
   },
   "privacy": {
     "storage_file": "privacy_data.json"

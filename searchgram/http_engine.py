@@ -192,7 +192,8 @@ class HTTPSearchEngine(BasicSearchEngine):
         user: str = None,
         page: int = 1,
         mode: str = None,
-        blocked_users: List[int] = None
+        blocked_users: List[int] = None,
+        chat_id: int = None
     ) -> Dict[str, Any]:
         """
         Search for messages.
@@ -204,6 +205,7 @@ class HTTPSearchEngine(BasicSearchEngine):
             page: Page number (1-based)
             mode: Search mode ('e' for exact, None for fuzzy)
             blocked_users: List of user IDs to exclude
+            chat_id: Optional chat ID to filter results (for group-specific searches)
 
         Returns:
             Search results dict with hits, totalHits, totalPages, page, hitsPerPage
@@ -224,6 +226,9 @@ class HTTPSearchEngine(BasicSearchEngine):
 
         if blocked_users:
             payload["blocked_users"] = blocked_users
+
+        if chat_id:
+            payload["chat_id"] = chat_id
 
         # Make request
         result = self._make_request("POST", "/api/v1/search", json=payload)

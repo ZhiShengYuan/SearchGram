@@ -250,17 +250,29 @@ def generate_navigation(page, total_pages):
     return markup
 
 
-def parse_and_search(text, page=1, requester_info=None) -> Tuple[str, InlineKeyboardMarkup | None]:
-    # return text and markup
+def parse_and_search(text, page=1, requester_info=None, chat_id=None) -> Tuple[str, InlineKeyboardMarkup | None]:
+    """
+    Parse search query and perform search.
+
+    Args:
+        text: Search query text
+        page: Page number
+        requester_info: Requester information for display
+        chat_id: Optional chat ID to filter results (for group-specific searches)
+
+    Returns:
+        Tuple of (result_text, inline_keyboard_markup)
+    """
     args = parser.parse_args(text.split())
     _type = args.type
     user = args.user
     keyword = args.keyword
     mode = args.mode
-    logging.info("Search keyword: %s, type: %s, user: %s, page: %s, mode: %s", keyword, _type, user, page, mode)
+    logging.info("Search keyword: %s, type: %s, user: %s, page: %s, mode: %s, chat_id: %s",
+                 keyword, _type, user, page, mode, chat_id)
 
-    # Perform search
-    results = tgdb.search(keyword, _type, user, page, mode)
+    # Perform search with optional chat_id filter
+    results = tgdb.search(keyword, _type, user, page, mode, chat_id=chat_id)
 
     # Filter results to exclude blocked users (privacy control)
     results = privacy_manager.filter_search_results(results)
@@ -320,7 +332,9 @@ def type_search_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     requester_info = get_requester_info(message)
-    text, markup = parse_and_search(refined_text, requester_info=requester_info)
+    # In groups, filter search results to only this group
+    group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
+    text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id)
     message.reply_text(
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
@@ -332,7 +346,9 @@ def search_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     requester_info = get_requester_info(message)
-    text, markup = parse_and_search(message.text, requester_info=requester_info)
+    # In groups, filter search results to only this group
+    group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
+    text, markup = parse_and_search(message.text, requester_info=requester_info, chat_id=group_chat_id)
 
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
@@ -376,7 +392,10 @@ def send_method_callback(client: "Client", callback_query: types.CallbackQuery):
     else:
         refined_text = user_query
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    new_text, new_markup = parse_and_search(refined_text, new_page)
+
+    # In groups, filter search results to only this group
+    group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
+    new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id)
     message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
 
 

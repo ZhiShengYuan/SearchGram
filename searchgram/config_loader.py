@@ -228,7 +228,12 @@ ELASTIC_USER = _config_loader.get("search_engine.elastic.user", "elastic")
 ELASTIC_PASS = _config_loader.get("search_engine.elastic.password", "changeme")
 
 # Bot access control
-BOT_MODE = _config_loader.get("bot.mode", "private").lower()
+# Support both string and list for mode
+_bot_mode = _config_loader.get("bot.mode", "private")
+if isinstance(_bot_mode, list):
+    BOT_MODE = [m.lower() for m in _bot_mode]
+else:
+    BOT_MODE = _bot_mode.lower()
 ALLOWED_GROUPS = _config_loader.get_list("bot.allowed_groups", [], item_type=int)
 ALLOWED_USERS = _config_loader.get_list("bot.allowed_users", [], item_type=int)
 

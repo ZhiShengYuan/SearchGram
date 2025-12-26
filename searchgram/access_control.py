@@ -19,20 +19,29 @@ class AccessController:
     """
     Manages access control for the bot.
 
-    Supports three modes:
+    Supports multiple modes simultaneously:
     - private: Only owner can use the bot
-    - group: Bot works in whitelisted groups and for allowed users
+    - group: Bot works in whitelisted groups
     - public: Anyone can use the bot (not recommended for privacy)
+
+    Mode can be a single string or a list of strings for multi-mode support.
+    Example: ["private", "group"] enables both private and group access.
     """
 
     def __init__(self):
-        self.mode = BOT_MODE
+        # Support both single mode and multi-mode
+        mode_config = BOT_MODE
+        if isinstance(mode_config, list):
+            self.modes = set(mode_config)
+        else:
+            self.modes = {mode_config}
+
         self.owner_id = int(OWNER_ID)
         self.allowed_groups = set(ALLOWED_GROUPS)
         self.allowed_users = set(ALLOWED_USERS) | {self.owner_id}
 
-        logging.info("Access Control initialized: mode=%s, owner=%d", self.mode, self.owner_id)
-        if self.mode == "group":
+        logging.info("Access Control initialized: modes=%s, owner=%d", self.modes, self.owner_id)
+        if "group" in self.modes:
             logging.info("Allowed groups: %s", self.allowed_groups)
             logging.info("Allowed users: %s", self.allowed_users)
 
@@ -52,6 +61,8 @@ class AccessController:
         """
         Check if user has access to use the bot.
 
+        Supports multi-mode access control. Checks all enabled modes.
+
         Args:
             message: Pyrogram message object
 
@@ -66,31 +77,34 @@ class AccessController:
         if user_id and self.is_owner(user_id):
             return True, "owner"
 
-        # Private mode: only owner
-        if self.mode == "private":
-            return False, "Bot is in private mode. Only owner can use it."
-
-        # Public mode: everyone has access
-        if self.mode == "public":
+        # Public mode: everyone has access (if enabled)
+        if "public" in self.modes:
             return True, "public"
 
-        # Group mode: check various conditions
-        if self.mode == "group":
-            # Direct message from allowed user
-            if chat_type == enums.ChatType.PRIVATE:
-                if user_id and self.is_allowed_user(user_id):
+        # Private chats
+        if chat_type == enums.ChatType.PRIVATE:
+            # Private mode: owner already checked above
+            if "private" in self.modes:
+                # Additional allowed users (when group mode is also enabled)
+                if "group" in self.modes and user_id and self.is_allowed_user(user_id):
                     return True, "allowed_user"
-                return False, "You are not authorized to use this bot in private messages."
+                # If only private mode, owner-only
+                if len(self.modes) == 1 and "private" in self.modes:
+                    return False, "Bot is in private mode. Only owner can use it."
+                # Private mode enabled but user not in allowed list
+                if "group" in self.modes:
+                    return False, "You are not authorized to use this bot in private messages."
 
-            # Group/supergroup/channel
-            if chat_type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+        # Group/supergroup chats
+        if chat_type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+            # Group mode: check if group is whitelisted
+            if "group" in self.modes:
                 if self.is_allowed_group(chat_id):
                     return True, "allowed_group"
                 return False, "This bot is not enabled for this group."
 
-            return False, "Unknown chat type or not authorized."
-
-        return False, f"Unknown bot mode: {self.mode}"
+        # No matching mode
+        return False, f"No access granted. Enabled modes: {', '.join(self.modes)}"
 
     def require_access(self, func: Callable) -> Callable:
         """
@@ -169,7 +183,7 @@ def require_owner(func: Callable) -> Callable:
 if __name__ == "__main__":
     # Test access control
     ac = AccessController()
-    print(f"Mode: {ac.mode}")
+    print(f"Modes: {ac.modes}")
     print(f"Owner: {ac.owner_id}")
     print(f"Is owner: {ac.is_owner(ac.owner_id)}")
     print(f"Is allowed user: {ac.is_allowed_user(123456)}")

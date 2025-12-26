@@ -55,15 +55,17 @@ class BasicSearchEngine:
     def upsert(self, message):
         pass
 
-    def search(self, keyword, _type=None, user=None, page=1, mode=None) -> dict:
+    def search(self, keyword, _type=None, user=None, page=1, mode=None, chat_id=None) -> dict:
         """
+        Search for messages with optional filters.
 
-        :param keyword:
+        :param keyword: Search keyword
         :param _type: ChatType.["BOT", "CHANNEL", "GROUP", "PRIVATE", "SUPERGROUP"]
         :param user: username or id
-        :param page:
-        :param mode: exact match
-        :return:
+        :param page: Page number
+        :param mode: exact match mode
+        :param chat_id: Optional chat ID to filter results (for group-specific searches)
+        :return: Search results dict
         """
 
         return {
