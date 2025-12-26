@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -56,6 +57,61 @@ func (h *APIHandler) Upsert(c *gin.Context) {
 	c.JSON(http.StatusOK, models.UpsertResponse{
 		Success: true,
 		ID:      message.ID,
+	})
+}
+
+// UpsertBatch handles batch message indexing
+// POST /api/v1/upsert/batch
+func (h *APIHandler) UpsertBatch(c *gin.Context) {
+	var req models.BatchUpsertRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).Warn("Invalid batch upsert request")
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Validate batch not empty
+	if len(req.Messages) == 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: "messages array cannot be empty",
+		})
+		return
+	}
+
+	// Validate individual messages
+	for i, message := range req.Messages {
+		if message.ID == "" {
+			c.JSON(http.StatusBadRequest, models.ErrorResponse{
+				Error:   "Bad Request",
+				Message: fmt.Sprintf("message at index %d is missing ID", i),
+			})
+			return
+		}
+	}
+
+	log.WithField("count", len(req.Messages)).Info("Processing batch upsert")
+
+	indexed, errors, err := h.engine.UpsertBatch(req.Messages)
+	if err != nil {
+		log.WithError(err).Error("Failed to batch upsert messages")
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: "Failed to batch index messages",
+		})
+		return
+	}
+
+	failed := len(req.Messages) - indexed
+
+	c.JSON(http.StatusOK, models.BatchUpsertResponse{
+		Success:      failed == 0,
+		IndexedCount: indexed,
+		FailedCount:  failed,
+		Errors:       errors,
 	})
 }
 

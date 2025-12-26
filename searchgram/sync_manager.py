@@ -211,30 +211,69 @@ class SyncManager:
 
             batch_count = 0
             error_in_batch = False
+            message_batch = []
+
+            # Check if engine supports batch insert
+            supports_batch = hasattr(self.search_engine, 'upsert_batch')
 
             # Iterate through messages
             for message in self.client.get_chat_history(chat_id, offset_id=offset_id):
                 try:
-                    # Index the message
-                    self.search_engine.upsert(message)
+                    if supports_batch:
+                        # Collect messages for batch insert
+                        message_batch.append(message)
+                        batch_count += 1
 
-                    # Update progress
-                    progress.synced_count += 1
-                    progress.last_message_id = message.id
-                    batch_count += 1
+                        # Flush batch when threshold reached
+                        if batch_count >= SYNC_BATCH_SIZE:
+                            # Batch insert
+                            result = self.search_engine.upsert_batch(message_batch)
 
-                    # Save checkpoint every batch
-                    if batch_count >= SYNC_BATCH_SIZE:
-                        progress.last_checkpoint = datetime.utcnow().isoformat()
-                        self._save_checkpoint()
-                        if progress_callback:
-                            progress_callback(progress)
+                            # Update progress
+                            progress.synced_count += result.get('indexed_count', len(message_batch))
+                            progress.last_message_id = message_batch[-1].id
+                            progress.last_checkpoint = datetime.utcnow().isoformat()
 
-                        logging.info(
-                            f"Chat {chat_id}: {progress.synced_count}/{progress.total_count} "
-                            f"({progress.to_dict()['progress_percent']}%)"
-                        )
-                        batch_count = 0
+                            # Handle errors
+                            if result.get('failed_count', 0) > 0:
+                                progress.error_count += result['failed_count']
+                                progress.last_error = f"Batch had {result['failed_count']} failures"
+
+                            # Save checkpoint
+                            self._save_checkpoint()
+                            if progress_callback:
+                                progress_callback(progress)
+
+                            logging.info(
+                                f"Chat {chat_id}: {progress.synced_count}/{progress.total_count} "
+                                f"({progress.to_dict()['progress_percent']}%) - "
+                                f"Batch: {result.get('indexed_count', 0)}/{len(message_batch)} indexed"
+                            )
+
+                            # Reset batch
+                            message_batch = []
+                            batch_count = 0
+                    else:
+                        # Fallback to individual insert
+                        self.search_engine.upsert(message)
+
+                        # Update progress
+                        progress.synced_count += 1
+                        progress.last_message_id = message.id
+                        batch_count += 1
+
+                        # Save checkpoint every batch
+                        if batch_count >= SYNC_BATCH_SIZE:
+                            progress.last_checkpoint = datetime.utcnow().isoformat()
+                            self._save_checkpoint()
+                            if progress_callback:
+                                progress_callback(progress)
+
+                            logging.info(
+                                f"Chat {chat_id}: {progress.synced_count}/{progress.total_count} "
+                                f"({progress.to_dict()['progress_percent']}%)"
+                            )
+                            batch_count = 0
 
                 except FloodWait as e:
                     # Telegram rate limiting - wait and retry
@@ -243,13 +282,29 @@ class SyncManager:
                     continue
 
                 except Exception as e:
-                    logging.error(f"Error indexing message {message.id} from chat {chat_id}: {e}")
+                    logging.error(f"Error indexing message from chat {chat_id}: {e}")
                     progress.error_count += 1
                     progress.last_error = str(e)
 
                     if not SYNC_RETRY_ON_ERROR or progress.error_count >= SYNC_MAX_RETRIES:
                         error_in_batch = True
                         break
+
+            # Flush remaining messages in batch
+            if supports_batch and message_batch and not error_in_batch:
+                try:
+                    result = self.search_engine.upsert_batch(message_batch)
+                    progress.synced_count += result.get('indexed_count', len(message_batch))
+                    progress.last_message_id = message_batch[-1].id
+                    progress.last_checkpoint = datetime.utcnow().isoformat()
+
+                    if result.get('failed_count', 0) > 0:
+                        progress.error_count += result['failed_count']
+
+                    logging.info(f"Flushed final batch: {result.get('indexed_count', 0)} messages")
+                except Exception as e:
+                    logging.error(f"Error flushing final batch: {e}")
+                    progress.error_count += len(message_batch)
 
             # Final checkpoint
             if not error_in_batch:

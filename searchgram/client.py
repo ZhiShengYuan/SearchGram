@@ -15,6 +15,7 @@ import fakeredis
 from pyrogram import Client, filters, types
 
 from . import SearchEngine
+from .buffered_engine import BufferedSearchEngine
 from .config_loader import BOT_ID, SYNC_ENABLED, get_config
 from .init_client import get_client
 from .sync_manager import SyncManager
@@ -23,7 +24,21 @@ from .utils import setup_logger
 setup_logger()
 
 app = get_client()
-tgdb = SearchEngine()
+config = get_config()
+
+# Initialize search engine with optional buffering
+base_engine = SearchEngine()
+batch_enabled = config.get_bool("search_engine.batch.enabled", True)
+batch_size = config.get_int("search_engine.batch.size", 100)
+flush_interval = config.get_float("search_engine.batch.flush_interval", 1.0)
+
+tgdb = BufferedSearchEngine(
+    engine=base_engine,
+    batch_size=batch_size,
+    flush_interval=flush_interval,
+    enabled=batch_enabled
+)
+
 r = fakeredis.FakeStrictRedis()
 
 # Initialize sync manager

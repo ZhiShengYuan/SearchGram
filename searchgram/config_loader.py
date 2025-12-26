@@ -125,6 +125,14 @@ See config.example.json for reference.
         except (ValueError, TypeError):
             return default
 
+    def get_float(self, key_path: str, default: float = 0.0) -> float:
+        """Get float configuration value."""
+        value = self.get(key_path, default)
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+
     def get_bool(self, key_path: str, default: bool = False) -> bool:
         """Get boolean configuration value."""
         value = self.get(key_path, default)

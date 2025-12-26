@@ -72,6 +72,7 @@ func main() {
 	{
 		// Message operations
 		v1.POST("/upsert", apiHandler.Upsert)
+		v1.POST("/upsert/batch", apiHandler.UpsertBatch)
 		v1.POST("/search", apiHandler.Search)
 		v1.DELETE("/messages", apiHandler.DeleteMessages)
 		v1.DELETE("/users/:user_id", apiHandler.DeleteUser)

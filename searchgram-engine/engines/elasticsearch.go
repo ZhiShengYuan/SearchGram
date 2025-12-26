@@ -200,6 +200,65 @@ func (e *ElasticsearchEngine) Upsert(message *models.Message) error {
 	return nil
 }
 
+// UpsertBatch indexes or updates multiple messages using the Bulk API
+func (e *ElasticsearchEngine) UpsertBatch(messages []models.Message) (int, []string, error) {
+	ctx := context.Background()
+
+	if len(messages) == 0 {
+		return 0, nil, nil
+	}
+
+	// Create bulk request
+	bulkRequest := e.client.Bulk().Index(e.index)
+
+	// Add all messages to bulk request
+	for i := range messages {
+		req := elastic.NewBulkIndexRequest().
+			Id(messages[i].ID).
+			Doc(&messages[i])
+		bulkRequest.Add(req)
+	}
+
+	// Execute bulk request
+	bulkResponse, err := bulkRequest.Do(ctx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("failed to execute bulk upsert: %w", err)
+	}
+
+	// Process results
+	var errors []string
+	indexed := 0
+	failed := 0
+
+	// Check for individual item errors
+	if bulkResponse.Errors {
+		for _, item := range bulkResponse.Items {
+			for action, result := range item {
+				if result.Error != nil {
+					failed++
+					errorMsg := fmt.Sprintf("Document %s failed (%s): %s",
+						result.Id, action, result.Error.Reason)
+					errors = append(errors, errorMsg)
+					log.WithField("document_id", result.Id).Warn(errorMsg)
+				} else {
+					indexed++
+				}
+			}
+		}
+	} else {
+		// All documents indexed successfully
+		indexed = len(messages)
+	}
+
+	log.WithFields(log.Fields{
+		"total":   len(messages),
+		"indexed": indexed,
+		"failed":  failed,
+	}).Info("Bulk upsert completed")
+
+	return indexed, errors, nil
+}
+
 // Search performs a search query
 func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchResponse, error) {
 	ctx := context.Background()

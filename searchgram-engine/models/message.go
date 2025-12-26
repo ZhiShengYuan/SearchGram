@@ -85,6 +85,19 @@ type StatsResponse struct {
 	RequestsPerMinute  float64 `json:"requests_per_minute"`
 }
 
+// BatchUpsertRequest represents a batch upsert request
+type BatchUpsertRequest struct {
+	Messages []Message `json:"messages"`
+}
+
+// BatchUpsertResponse represents the result of a batch upsert operation
+type BatchUpsertResponse struct {
+	Success      bool     `json:"success"`
+	IndexedCount int      `json:"indexed_count"`
+	FailedCount  int      `json:"failed_count"`
+	Errors       []string `json:"errors,omitempty"`
+}
+
 // ErrorResponse represents an error response
 type ErrorResponse struct {
 	Error   string `json:"error"`

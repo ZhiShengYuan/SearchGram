@@ -7,6 +7,9 @@ type SearchEngine interface {
 	// Upsert indexes or updates a message
 	Upsert(message *models.Message) error
 
+	// UpsertBatch indexes or updates multiple messages in a single operation
+	UpsertBatch(messages []models.Message) (int, []string, error)
+
 	// Search performs a search query
 	Search(req *models.SearchRequest) (*models.SearchResponse, error)
 

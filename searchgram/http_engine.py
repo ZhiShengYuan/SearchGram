@@ -142,26 +142,18 @@ class HTTPSearchEngine(BasicSearchEngine):
             logging.error(f"Request failed: {e}")
             raise Exception(f"Search service request failed: {e}")
 
-    def upsert(self, message: "types.Message") -> None:
+    def _convert_message_to_dict(self, message: "types.Message") -> Dict[str, Any]:
         """
-        Index or update a message.
+        Convert a Pyrogram message to a dictionary payload.
 
         Args:
             message: Pyrogram message object
+
+        Returns:
+            Dictionary payload for API
         """
-        # Convert Pyrogram message to JSON
-        message_dict = json.loads(str(message))
-
-        # Add composite ID
-        message_dict["id"] = f"{message.chat.id}-{message.id}"
-
-        # Add timestamp for sorting
-        if hasattr(message, 'date') and message.date:
-            message_dict["timestamp"] = int(message.date.timestamp())
-
-        # Prepare payload
-        payload = {
-            "id": message_dict["id"],
+        return {
+            "id": f"{message.chat.id}-{message.id}",
             "message_id": message.id,
             "text": message.text or "",
             "chat": {
@@ -181,9 +173,50 @@ class HTTPSearchEngine(BasicSearchEngine):
             "timestamp": int(message.date.timestamp()) if hasattr(message, 'date') and message.date else 0,
         }
 
+    def upsert(self, message: "types.Message") -> None:
+        """
+        Index or update a message.
+
+        Args:
+            message: Pyrogram message object
+        """
+        # Prepare payload
+        payload = self._convert_message_to_dict(message)
+
         # Make request
         self._make_request("POST", "/api/v1/upsert", json=payload)
         logging.debug(f"Upserted message: {payload['id']}")
+
+    def upsert_batch(self, messages: List["types.Message"]) -> Dict[str, Any]:
+        """
+        Index or update multiple messages in a single batch request.
+
+        Args:
+            messages: List of Pyrogram message objects
+
+        Returns:
+            Dictionary with batch operation results
+        """
+        if not messages:
+            return {"indexed_count": 0, "failed_count": 0, "errors": []}
+
+        # Convert all messages to payloads
+        payloads = [self._convert_message_to_dict(msg) for msg in messages]
+
+        # Prepare batch request
+        batch_payload = {
+            "messages": payloads
+        }
+
+        # Make request
+        result = self._make_request("POST", "/api/v1/upsert/batch", json=batch_payload)
+
+        logging.info(
+            f"Batch upsert completed: {result.get('indexed_count', 0)} indexed, "
+            f"{result.get('failed_count', 0)} failed out of {len(messages)} messages"
+        )
+
+        return result
 
     def search(
         self,
