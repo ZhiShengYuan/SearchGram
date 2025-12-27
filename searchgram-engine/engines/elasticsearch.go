@@ -21,6 +21,7 @@ const (
 // ElasticsearchEngine implements SearchEngine for Elasticsearch
 type ElasticsearchEngine struct {
 	client    *elastic.Client
+	host      string
 	index     string
 	startTime time.Time
 }
@@ -56,6 +57,7 @@ func NewElasticsearch(host, username, password, index string, shards, replicas i
 
 	engine := &ElasticsearchEngine{
 		client:    client,
+		host:      host,
 		index:     index,
 		startTime: time.Now(),
 	}
@@ -413,7 +415,7 @@ func (e *ElasticsearchEngine) Ping() (*models.PingResponse, error) {
 	ctx := context.Background()
 
 	// Get ES info (includes version and health)
-	info, code, err := e.client.Ping(e.client.String()).Do(ctx)
+	info, code, err := e.client.Ping(e.host).Do(ctx)
 	if err != nil || code != 200 {
 		return &models.PingResponse{
 			Status: "error",
@@ -524,9 +526,11 @@ func (e *ElasticsearchEngine) Dedup() (*models.DedupResponse, error) {
 	var duplicatesFound int64 = 0
 	var duplicatesRemoved int64 = 0
 	var afterKey map[string]interface{} = nil
+	var pageCount int = 0
 
 	// Process all composite aggregation pages
 	for {
+		pageCount++
 		if afterKey != nil {
 			compositeAgg.AggregateAfter(afterKey)
 		}
@@ -546,6 +550,13 @@ func (e *ElasticsearchEngine) Dedup() (*models.DedupResponse, error) {
 		if !found {
 			break
 		}
+
+		log.WithFields(log.Fields{
+			"page":              pageCount,
+			"buckets":           len(compAgg.Buckets),
+			"duplicates_found":  duplicatesFound,
+			"duplicates_removed": duplicatesRemoved,
+		}).Info("Processing deduplication page")
 
 		// Process each bucket (unique chat_id + message_id combination)
 		for _, bucket := range compAgg.Buckets {

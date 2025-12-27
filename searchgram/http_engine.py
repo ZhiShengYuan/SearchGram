@@ -101,13 +101,14 @@ class HTTPSearchEngine(BasicSearchEngine):
             logging.error(f"Failed to connect to search service: {e}")
             raise ConnectionError(f"Cannot connect to search service at {self.base_url}: {e}")
 
-    def _make_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
+    def _make_request(self, method: str, endpoint: str, timeout: Optional[int] = None, **kwargs) -> Dict[str, Any]:
         """
         Make an HTTP/2 request to the Go service with automatic retries.
 
         Args:
             method: HTTP method (GET, POST, DELETE, etc.)
             endpoint: API endpoint (e.g., "/api/v1/search")
+            timeout: Optional custom timeout in seconds (overrides default)
             **kwargs: Additional arguments for httpx
 
         Returns:
@@ -118,10 +119,14 @@ class HTTPSearchEngine(BasicSearchEngine):
         """
         url = f"{self.base_url}{endpoint}"
 
+        # Use custom timeout if provided
+        request_timeout = httpx.Timeout(timeout) if timeout else None
+
         try:
             response = self.client.request(
                 method=method,
                 url=url,
+                timeout=request_timeout,
                 **kwargs
             )
             response.raise_for_status()
@@ -340,6 +345,9 @@ class HTTPSearchEngine(BasicSearchEngine):
         Finds messages with the same chat_id + message_id combination
         and keeps only the latest version (by timestamp).
 
+        Note: This operation can take several minutes for large databases.
+              Uses a 10-minute timeout to allow completion.
+
         Returns:
             Dictionary with deduplication results:
             - success: bool
@@ -347,7 +355,11 @@ class HTTPSearchEngine(BasicSearchEngine):
             - duplicates_removed: int
             - message: str
         """
-        result = self._make_request("POST", "/api/v1/dedup")
+        logging.info("Starting deduplication (this may take several minutes)...")
+
+        # Use 10-minute timeout for dedup operations (they can be slow on large DBs)
+        result = self._make_request("POST", "/api/v1/dedup", timeout=600)
+
         duplicates_found = result.get("duplicates_found", 0)
         duplicates_removed = result.get("duplicates_removed", 0)
         logging.info(

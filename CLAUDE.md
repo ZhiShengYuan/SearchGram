@@ -209,10 +209,16 @@ The `/dedup` command removes duplicate messages from the search index. This is u
 ```
 
 The bot will show:
-- Progress message during processing
-- Number of duplicates found
-- Number of duplicates removed
-- Success or error status
+- Initial message with estimated time
+- Progress updates every 15 seconds with elapsed time
+- Number of duplicates found and removed
+- Total operation time and success status
+
+**Technical Details:**
+- Uses 10-minute timeout to handle large databases
+- Progress logged to server logs every 1000 composite aggregation buckets
+- Processes duplicates in batches using Elasticsearch bulk delete
+- Thread-safe operation with status updates
 
 **Note:** The upsert operations are designed to be idempotent (using document IDs), so duplicates should be rare. However, this command provides a way to manually clean up the database if needed.
 

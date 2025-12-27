@@ -155,12 +155,18 @@ def ping_handler(client: "Client", message: "types.Message"):
 @require_owner
 def dedup_handler(client: "Client", message: "types.Message"):
     """Remove duplicate messages from the search index (owner only)."""
+    import time
+    import threading
+
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     # Send initial message
     status_msg = client.send_message(
         message.chat.id,
-        "🔄 Starting deduplication process...\nThis may take a few minutes for large databases.",
+        "🔄 **Starting deduplication process...**\n\n"
+        "⏱️ This can take up to 10 minutes for large databases.\n"
+        "📊 Check your server logs for detailed progress.\n\n"
+        "_Please wait, processing..._",
         parse_mode=enums.ParseMode.MARKDOWN
     )
 
@@ -168,34 +174,81 @@ def dedup_handler(client: "Client", message: "types.Message"):
         # Check if the engine supports dedup
         if not hasattr(tgdb, 'dedup'):
             status_msg.edit_text(
-                "❌ Deduplication is not supported by your current search engine.\n"
-                "Please use `ENGINE=http` (Go search service) for dedup support.",
+                "❌ **Deduplication Not Supported**\n\n"
+                "Your current search engine doesn't support deduplication.\n"
+                "Please use `ENGINE=http` (Go search service) for this feature.",
                 parse_mode=enums.ParseMode.MARKDOWN
             )
             return
 
-        # Run deduplication
-        result = tgdb.dedup()
+        # Track operation start time
+        start_time = time.time()
+        dedup_done = threading.Event()
+        dedup_result = {}
+        dedup_error = None
 
-        # Format response
-        duplicates_found = result.get('duplicates_found', 0)
-        duplicates_removed = result.get('duplicates_removed', 0)
+        # Run deduplication in background thread
+        def run_dedup():
+            nonlocal dedup_result, dedup_error
+            try:
+                dedup_result = tgdb.dedup()
+            except Exception as e:
+                dedup_error = e
+            finally:
+                dedup_done.set()
+
+        # Start dedup in background
+        dedup_thread = threading.Thread(target=run_dedup, daemon=True)
+        dedup_thread.start()
+
+        # Update status every 15 seconds while running
+        update_interval = 15
+        last_update = 0
+        while not dedup_done.is_set():
+            dedup_done.wait(timeout=update_interval)
+            elapsed = int(time.time() - start_time)
+
+            # Only update message if enough time has passed (avoid rate limits)
+            if elapsed - last_update >= update_interval and not dedup_done.is_set():
+                try:
+                    status_msg.edit_text(
+                        f"🔄 **Deduplication in progress...**\n\n"
+                        f"⏱️ Elapsed time: {elapsed // 60}m {elapsed % 60}s\n"
+                        f"📊 Check server logs for detailed progress.\n\n"
+                        f"_Please wait, this may take up to 10 minutes..._",
+                        parse_mode=enums.ParseMode.MARKDOWN
+                    )
+                    last_update = elapsed
+                except Exception:
+                    pass  # Ignore edit errors (rate limits, etc.)
+
+        # Check for errors
+        if dedup_error:
+            raise dedup_error
+
+        # Format final response
+        duplicates_found = dedup_result.get('duplicates_found', 0)
+        duplicates_removed = dedup_result.get('duplicates_removed', 0)
+        elapsed = int(time.time() - start_time)
 
         if duplicates_found == 0:
-            response_text = "✅ **Deduplication Complete**\n\n" \
-                          "No duplicates found. Your database is clean!"
+            response_text = f"✅ **Deduplication Complete**\n\n" \
+                          f"⏱️ Completed in {elapsed // 60}m {elapsed % 60}s\n\n" \
+                          f"No duplicates found. Your database is clean! 🎉"
         else:
             response_text = f"✅ **Deduplication Complete**\n\n" \
-                          f"📊 Duplicates found: {duplicates_found}\n" \
-                          f"🗑️ Duplicates removed: {duplicates_removed}\n\n" \
-                          f"Your database has been optimized!"
+                          f"⏱️ Completed in {elapsed // 60}m {elapsed % 60}s\n" \
+                          f"📊 Duplicates found: {duplicates_found:,}\n" \
+                          f"🗑️ Duplicates removed: {duplicates_removed:,}\n\n" \
+                          f"Your database has been optimized! 🎉"
 
         status_msg.edit_text(response_text, parse_mode=enums.ParseMode.MARKDOWN)
 
     except Exception as e:
         error_text = f"❌ **Deduplication Failed**\n\n" \
                    f"Error: {str(e)}\n\n" \
-                   f"Please check the logs for more details."
+                   f"💡 Tip: Check your server logs for more details.\n" \
+                   f"Make sure your Go search service and Elasticsearch are running."
         status_msg.edit_text(error_text, parse_mode=enums.ParseMode.MARKDOWN)
         logging.exception("Deduplication failed")
 
