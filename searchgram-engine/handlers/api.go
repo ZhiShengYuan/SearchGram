@@ -275,3 +275,21 @@ func (h *APIHandler) Stats(c *gin.Context) {
 
 	c.JSON(http.StatusOK, result)
 }
+
+// Dedup handles deduplication requests
+// POST /api/v1/dedup
+func (h *APIHandler) Dedup(c *gin.Context) {
+	log.Info("Starting deduplication...")
+
+	result, err := h.engine.Dedup()
+	if err != nil {
+		log.WithError(err).Error("Deduplication failed")
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: "Deduplication failed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}

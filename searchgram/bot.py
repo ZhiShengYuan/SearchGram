@@ -128,6 +128,11 @@ def help_handler(client: "Client", message: "types.Message"):
 - `/unblock_me` - Opt-in: Allow your messages in search results
 - `/privacy_status` - Check your current privacy status
 
+{f'''**🛠️ Admin Commands (Owner Only):**
+- `/ping` - Check bot health and database stats
+- `/dedup` - Remove duplicate messages from database
+- `/delete` - Delete messages from specific chat
+''' if access_controller.is_owner(user.id if user else 0) else ''}
 **⚙️ Bot Mode:** {BOT_MODE}
 {f"**Blocked Users:** {privacy_manager.get_blocked_count()}" if access_controller.is_owner(user.id if user else 0) else ""}
 
@@ -144,6 +149,55 @@ def ping_handler(client: "Client", message: "types.Message"):
     text = tgdb.ping()
     text += f"\n🔐 Privacy: {privacy_manager.get_blocked_count()} users opted out"
     client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+
+
+@app.on_message(filters.command(["dedup"]))
+@require_owner
+def dedup_handler(client: "Client", message: "types.Message"):
+    """Remove duplicate messages from the search index (owner only)."""
+    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    # Send initial message
+    status_msg = client.send_message(
+        message.chat.id,
+        "🔄 Starting deduplication process...\nThis may take a few minutes for large databases.",
+        parse_mode=enums.ParseMode.MARKDOWN
+    )
+
+    try:
+        # Check if the engine supports dedup
+        if not hasattr(tgdb, 'dedup'):
+            status_msg.edit_text(
+                "❌ Deduplication is not supported by your current search engine.\n"
+                "Please use `ENGINE=http` (Go search service) for dedup support.",
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+            return
+
+        # Run deduplication
+        result = tgdb.dedup()
+
+        # Format response
+        duplicates_found = result.get('duplicates_found', 0)
+        duplicates_removed = result.get('duplicates_removed', 0)
+
+        if duplicates_found == 0:
+            response_text = "✅ **Deduplication Complete**\n\n" \
+                          "No duplicates found. Your database is clean!"
+        else:
+            response_text = f"✅ **Deduplication Complete**\n\n" \
+                          f"📊 Duplicates found: {duplicates_found}\n" \
+                          f"🗑️ Duplicates removed: {duplicates_removed}\n\n" \
+                          f"Your database has been optimized!"
+
+        status_msg.edit_text(response_text, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        error_text = f"❌ **Deduplication Failed**\n\n" \
+                   f"Error: {str(e)}\n\n" \
+                   f"Please check the logs for more details."
+        status_msg.edit_text(error_text, parse_mode=enums.ParseMode.MARKDOWN)
+        logging.exception("Deduplication failed")
 
 
 @app.on_message(filters.command(["delete"]))

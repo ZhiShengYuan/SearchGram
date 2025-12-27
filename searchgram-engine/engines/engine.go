@@ -28,6 +28,9 @@ type SearchEngine interface {
 	// Stats returns detailed statistics
 	Stats() (*models.StatsResponse, error)
 
+	// Dedup removes duplicate messages (keeps latest by timestamp)
+	Dedup() (*models.DedupResponse, error)
+
 	// Close closes the connection to the search engine
 	Close() error
 }

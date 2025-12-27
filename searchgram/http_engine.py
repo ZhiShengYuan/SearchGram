@@ -333,6 +333,29 @@ class HTTPSearchEngine(BasicSearchEngine):
         logging.info(f"Deleted {deleted_count} messages from user {user_id}")
         return deleted_count
 
+    def dedup(self) -> Dict[str, Any]:
+        """
+        Remove duplicate messages from the search index.
+
+        Finds messages with the same chat_id + message_id combination
+        and keeps only the latest version (by timestamp).
+
+        Returns:
+            Dictionary with deduplication results:
+            - success: bool
+            - duplicates_found: int
+            - duplicates_removed: int
+            - message: str
+        """
+        result = self._make_request("POST", "/api/v1/dedup")
+        duplicates_found = result.get("duplicates_found", 0)
+        duplicates_removed = result.get("duplicates_removed", 0)
+        logging.info(
+            f"Deduplication complete: {duplicates_found} duplicates found, "
+            f"{duplicates_removed} removed"
+        )
+        return result
+
 
 # Factory function for compatibility
 def SearchEngine(*args, **kwargs) -> HTTPSearchEngine:

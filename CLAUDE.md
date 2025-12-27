@@ -76,6 +76,16 @@ All configuration is managed by `searchgram/config_loader.py`:
 **Privacy Settings (NEW):**
 - `PRIVACY_STORAGE`: Path to privacy data JSON file (default: "privacy_data.json")
 
+**Sync Settings:**
+- `SYNC_ENABLED`: Enable background sync (default: `true`)
+- `SYNC_CHECKPOINT_FILE`: Path to sync progress file (default: "sync_progress.json")
+- `SYNC_BATCH_SIZE`: Messages per batch (default: 100)
+- `SYNC_RETRY_ON_ERROR`: Retry failed syncs (default: `true`)
+- `SYNC_MAX_RETRIES`: Max retry attempts (default: 3)
+- `SYNC_RESUME_ON_RESTART`: Resume incomplete syncs on restart (default: `true`)
+- `SYNC_DELAY_BETWEEN_BATCHES`: Delay between batches in seconds (default: 1.0)
+- `SYNC_CLEAR_COMPLETED`: Remove completed chats from checkpoint (default: `false` - **keeps completed chats to prevent re-sync**)
+
 **Network Settings:**
 - `PROXY`: Optional proxy configuration (dict or JSON string)
 - `IPv6`: Enable IPv6 support
@@ -156,8 +166,6 @@ Tests currently cover the argument parser for search query syntax.
 **Search Commands:**
 - `/start` - Start the bot and get welcome message
 - `/help` - Show comprehensive help with search syntax and privacy info
-- `/ping` - Check bot health and database stats (owner only)
-- `/delete` - Delete messages from specific chat (owner only)
 - `/{chat_type} [username] keyword` - Type-specific search (PRIVATE, GROUP, CHANNEL, etc.)
 
 **Privacy Commands (NEW):**
@@ -165,12 +173,48 @@ Tests currently cover the argument parser for search query syntax.
 - `/unblock_me` - Opt-in: Allow your messages in search results
 - `/privacy_status` - Check your current privacy status
 
+**Admin Commands (Owner Only):**
+- `/ping` - Check bot health and database stats
+- `/dedup` - Remove duplicate messages from database (requires `ENGINE=http`)
+- `/delete` - Delete messages from specific chat
+
 **Search Syntax:**
 - Global search: Just send any text message
 - Type filter: `-t=GROUP keyword`
 - User filter: `-u=username keyword` or `-u=userid keyword`
 - Exact match: `-m=e keyword` or `"keyword"`
 - Combined: `-t=GROUP -u=username -m=e keyword`
+
+## Deduplication
+
+The `/dedup` command removes duplicate messages from the search index. This is useful when:
+- Re-syncing chats causes duplicate indexing
+- Messages were indexed multiple times due to errors
+- Database optimization is needed
+
+**How it works:**
+1. Finds messages with the same `chat_id` + `message_id` combination
+2. Keeps the latest version (by timestamp)
+3. Deletes older duplicates using bulk operations
+4. Reports number of duplicates found and removed
+
+**Requirements:**
+- Must use `ENGINE=http` (Go search service with Elasticsearch)
+- Owner-only command for security
+- Can take several minutes for large databases
+
+**Usage:**
+```bash
+/dedup
+```
+
+The bot will show:
+- Progress message during processing
+- Number of duplicates found
+- Number of duplicates removed
+- Success or error status
+
+**Note:** The upsert operations are designed to be idempotent (using document IDs), so duplicates should be rare. However, this command provides a way to manually clean up the database if needed.
 
 ## Common Development Commands
 

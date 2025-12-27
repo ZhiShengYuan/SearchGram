@@ -67,6 +67,8 @@
     "resume_on_restart": true,
     "delay_between_batches": 1.0,
     "_delay_comment": "Delay in seconds between processing batches to avoid Telegram FloodWait rate limits. Recommended: 0.5-2.0 seconds",
+    "clear_completed": false,
+    "_clear_completed_comment": "If false (recommended), keeps completed chats in checkpoint to prevent re-sync on restart. If true, removes them after sync completes.",
     "chats": []
   }
 }

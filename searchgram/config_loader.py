@@ -256,6 +256,7 @@ SYNC_RETRY_ON_ERROR = _config_loader.get_bool("sync.retry_on_error", True)
 SYNC_MAX_RETRIES = _config_loader.get_int("sync.max_retries", 3)
 SYNC_RESUME_ON_RESTART = _config_loader.get_bool("sync.resume_on_restart", True)
 SYNC_DELAY_BETWEEN_BATCHES = _config_loader.get_float("sync.delay_between_batches", 1.0)
+SYNC_CLEAR_COMPLETED = _config_loader.get_bool("sync.clear_completed", False)
 
 
 if __name__ == "__main__":

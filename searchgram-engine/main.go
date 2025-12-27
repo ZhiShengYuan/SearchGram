@@ -78,6 +78,9 @@ func main() {
 		v1.DELETE("/users/:user_id", apiHandler.DeleteUser)
 		v1.DELETE("/clear", apiHandler.Clear)
 
+		// Maintenance operations
+		v1.POST("/dedup", apiHandler.Dedup)
+
 		// Health and stats
 		v1.GET("/ping", apiHandler.Ping)
 		v1.GET("/stats", apiHandler.Stats)

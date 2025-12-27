@@ -105,3 +105,11 @@ type ErrorResponse struct {
 	Message string `json:"message,omitempty"`
 	Code    int    `json:"code,omitempty"`
 }
+
+// DedupResponse represents the result of a deduplication operation
+type DedupResponse struct {
+	Success        bool  `json:"success"`
+	DuplicatesFound int64 `json:"duplicates_found"`
+	DuplicatesRemoved int64 `json:"duplicates_removed"`
+	Message        string `json:"message,omitempty"`
+}

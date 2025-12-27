@@ -501,6 +501,118 @@ func (e *ElasticsearchEngine) Stats() (*models.StatsResponse, error) {
 	}, nil
 }
 
+// Dedup removes duplicate messages (keeps latest by timestamp)
+func (e *ElasticsearchEngine) Dedup() (*models.DedupResponse, error) {
+	ctx := context.Background()
+
+	log.Info("Starting deduplication process...")
+
+	// Use aggregations to find duplicates by chat_id + message_id
+	compositeAgg := elastic.NewCompositeAggregation().
+		Size(1000).
+		Sources(
+			elastic.NewCompositeAggregationTermsValuesSource("chat_id").Field("chat.id"),
+			elastic.NewCompositeAggregationTermsValuesSource("message_id").Field("message_id"),
+		)
+
+	topHitsAgg := elastic.NewTopHitsAggregation().
+		Size(100).
+		Sort("timestamp", false) // Sort by timestamp descending
+
+	compositeAgg.SubAggregation("docs", topHitsAgg)
+
+	var duplicatesFound int64 = 0
+	var duplicatesRemoved int64 = 0
+	var afterKey map[string]interface{} = nil
+
+	// Process all composite aggregation pages
+	for {
+		if afterKey != nil {
+			compositeAgg.AggregateAfter(afterKey)
+		}
+
+		searchResult, err := e.client.Search().
+			Index(e.index).
+			Size(0).
+			Aggregation("duplicates", compositeAgg).
+			Do(ctx)
+
+		if err != nil {
+			return nil, fmt.Errorf("failed to search for duplicates: %w", err)
+		}
+
+		// Parse composite aggregation
+		compAgg, found := searchResult.Aggregations.Composite("duplicates")
+		if !found {
+			break
+		}
+
+		// Process each bucket (unique chat_id + message_id combination)
+		for _, bucket := range compAgg.Buckets {
+			// Get top hits for this bucket
+			topHits, found := bucket.Aggregations.TopHits("docs")
+			if !found || topHits == nil || topHits.Hits == nil {
+				continue
+			}
+
+			hitCount := len(topHits.Hits.Hits)
+			if hitCount <= 1 {
+				// No duplicates for this message
+				continue
+			}
+
+			// Found duplicates! Keep the first one (latest timestamp), delete the rest
+			duplicatesFound += int64(hitCount - 1)
+
+			// Collect document IDs to delete (skip the first one)
+			bulkDelete := e.client.Bulk().Index(e.index)
+			for i := 1; i < hitCount; i++ {
+				docID := topHits.Hits.Hits[i].Id
+				deleteReq := elastic.NewBulkDeleteRequest().Id(docID)
+				bulkDelete.Add(deleteReq)
+			}
+
+			// Execute bulk delete
+			if bulkDelete.NumberOfActions() > 0 {
+				bulkResp, err := bulkDelete.Do(ctx)
+				if err != nil {
+					log.WithError(err).Warn("Failed to delete duplicate documents")
+					continue
+				}
+
+				if !bulkResp.Errors {
+					duplicatesRemoved += int64(bulkDelete.NumberOfActions())
+				} else {
+					// Count successful deletions
+					for _, item := range bulkResp.Items {
+						for _, result := range item {
+							if result.Error == nil {
+								duplicatesRemoved++
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Check if there are more pages
+		if compAgg.AfterKey == nil || len(compAgg.Buckets) == 0 {
+			break
+		}
+		afterKey = compAgg.AfterKey
+	}
+
+	message := fmt.Sprintf("Deduplication complete: found %d duplicates, removed %d", duplicatesFound, duplicatesRemoved)
+	log.Info(message)
+
+	return &models.DedupResponse{
+		Success:           true,
+		DuplicatesFound:   duplicatesFound,
+		DuplicatesRemoved: duplicatesRemoved,
+		Message:           message,
+	}, nil
+}
+
 // Close closes the connection to Elasticsearch
 func (e *ElasticsearchEngine) Close() error {
 	e.client.Stop()

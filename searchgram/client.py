@@ -16,7 +16,7 @@ from pyrogram import Client, filters, types
 
 from . import SearchEngine
 from .buffered_engine import BufferedSearchEngine
-from .config_loader import BOT_ID, SYNC_ENABLED, get_config
+from .config_loader import BOT_ID, SYNC_ENABLED, SYNC_CLEAR_COMPLETED, get_config
 from .init_client import get_client
 from .sync_manager import SyncManager
 from .utils import setup_logger
@@ -206,8 +206,12 @@ Sync checkpoint saved. You can resume anytime!
         f"{summary['synced_messages']} messages indexed"
     )
 
-    # Clean up completed chats
-    sync_manager.clear_completed()
+    # Clean up completed chats (optional, controlled by config)
+    if SYNC_CLEAR_COMPLETED:
+        sync_manager.clear_completed()
+        logging.info("Cleared completed chats from checkpoint (SYNC_CLEAR_COMPLETED=True)")
+    else:
+        logging.info("Keeping completed chats in checkpoint to prevent re-sync on restart (SYNC_CLEAR_COMPLETED=False)")
 
 
 if __name__ == "__main__":
