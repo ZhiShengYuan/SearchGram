@@ -52,8 +52,19 @@
     },
     "allowed_groups": [],
     "_allowed_groups_example": [-1001234567890, -1009876543210],
+    "_allowed_groups_comment": "All groups that are indexed and searchable (defines the complete set of groups)",
     "allowed_users": [],
-    "_allowed_users_example": [123456789, 987654321]
+    "_allowed_users_example": [123456789, 987654321],
+    "_allowed_users_comment": "Users who can use the bot (must also be configured in user_group_permissions for group access)",
+    "admins": [],
+    "_admins_example": [111111111, 222222222],
+    "_admins_comment": "Admin users who can search ALL indexed groups (from allowed_groups). Admins are like owner but without admin command access.",
+    "user_group_permissions": {},
+    "_user_group_permissions_example": {
+      "123456789": [-1001234567890],
+      "987654321": [-1009876543210, -1001234567890]
+    },
+    "_user_group_permissions_comment": "Per-user group access control. Maps user_id (as string) to array of group_ids they can search. Users not listed or with empty array can't search any groups. Owner and admins bypass this."
   },
   "privacy": {
     "storage_file": "privacy_data.json"

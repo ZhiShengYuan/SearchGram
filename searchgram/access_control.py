@@ -14,7 +14,7 @@ from typing import Callable
 
 from pyrogram import Client, enums, types
 
-from .config_loader import ALLOWED_GROUPS, ALLOWED_USERS, BOT_MODE, OWNER_ID
+from .config_loader import ADMINS, ALLOWED_GROUPS, ALLOWED_USERS, BOT_MODE, OWNER_ID, USER_GROUP_PERMISSIONS
 
 
 class AccessController:
@@ -42,14 +42,31 @@ class AccessController:
         self.allowed_groups = set(ALLOWED_GROUPS)
         self.allowed_users = set(ALLOWED_USERS) | {self.owner_id}
 
+        # Enhanced permissions
+        self.admins = set(ADMINS)
+        # Convert user_group_permissions dict keys from str to int
+        self.user_group_permissions = {}
+        for user_id_str, group_ids in USER_GROUP_PERMISSIONS.items():
+            try:
+                user_id = int(user_id_str)
+                self.user_group_permissions[user_id] = set(group_ids) if isinstance(group_ids, list) else set()
+            except (ValueError, TypeError):
+                logging.warning(f"Invalid user_id in user_group_permissions: {user_id_str}")
+
         logging.info("Access Control initialized: modes=%s, owner=%d", self.modes, self.owner_id)
         if "group" in self.modes:
             logging.info("Allowed groups: %s", self.allowed_groups)
             logging.info("Allowed users: %s", self.allowed_users)
+            logging.info("Admins: %s", self.admins)
+            logging.info("User group permissions: %s", self.user_group_permissions)
 
     def is_owner(self, user_id: int) -> bool:
         """Check if user is the owner."""
         return user_id == self.owner_id
+
+    def is_admin(self, user_id: int) -> bool:
+        """Check if user is an admin (can search all groups)."""
+        return user_id in self.admins
 
     def is_allowed_user(self, user_id: int) -> bool:
         """Check if user is explicitly allowed."""
@@ -58,6 +75,26 @@ class AccessController:
     def is_allowed_group(self, chat_id: int) -> bool:
         """Check if group is whitelisted."""
         return chat_id in self.allowed_groups
+
+    def get_allowed_groups_for_user(self, user_id: int) -> set:
+        """
+        Get the set of group IDs that a user can search.
+
+        Args:
+            user_id: User ID to check
+
+        Returns:
+            Set of group IDs the user can access:
+            - Owner: all indexed groups (from allowed_groups)
+            - Admins: all indexed groups (from allowed_groups)
+            - Regular users: groups from user_group_permissions, or empty set if not configured
+        """
+        # Owner and admins can access all indexed groups
+        if self.is_owner(user_id) or self.is_admin(user_id):
+            return self.allowed_groups
+
+        # Regular users: return their specific permissions
+        return self.user_group_permissions.get(user_id, set())
 
     def check_access(self, message: types.Message) -> tuple[bool, str]:
         """
@@ -247,5 +284,11 @@ if __name__ == "__main__":
     ac = AccessController()
     print(f"Modes: {ac.modes}")
     print(f"Owner: {ac.owner_id}")
+    print(f"Admins: {ac.admins}")
+    print(f"User group permissions: {ac.user_group_permissions}")
+    print(f"\nPermission checks:")
     print(f"Is owner: {ac.is_owner(ac.owner_id)}")
+    print(f"Is admin: {ac.is_admin(123456)}")
     print(f"Is allowed user: {ac.is_allowed_user(123456)}")
+    print(f"\nAllowed groups for owner: {ac.get_allowed_groups_for_user(ac.owner_id)}")
+    print(f"Allowed groups for user 123456: {ac.get_allowed_groups_for_user(123456)}")

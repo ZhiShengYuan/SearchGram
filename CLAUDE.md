@@ -68,10 +68,18 @@ All configuration is managed by `searchgram/config_loader.py`:
   - `MEILI_HOST`, `MONGO_HOST`, `ZINC_HOST`, `ELASTIC_HOST`: Search engine endpoints
   - `ELASTIC_USER`, `ELASTIC_PASS`: Elasticsearch authentication credentials
 
-**Access Control (NEW):**
+**Access Control:**
 - `BOT_MODE`: Access control mode - `private` (owner only), `group` (whitelisted groups), `public` (anyone)
-- `ALLOWED_GROUPS`: Comma-separated list of group IDs where bot can work (e.g., "-1001234567890,-1009876543210")
-- `ALLOWED_USERS`: Comma-separated list of additional user IDs who can use the bot (e.g., "123456789,987654321")
+- `ALLOWED_GROUPS`: List of all group IDs that are indexed and searchable (defines the complete set of groups)
+- `ALLOWED_USERS`: List of user IDs who can use the bot (must also be configured in user_group_permissions for group access)
+- `ADMINS`: List of admin user IDs who can search ALL indexed groups (like owner but without admin command access)
+- `USER_GROUP_PERMISSIONS`: Per-user group access control - maps user_id (string) to list of group_ids they can search
+
+**Permission Hierarchy:**
+1. **Owner** (`OWNER_ID`): Full access to all groups, can run admin commands (`/ping`, `/dedup`, `/delete`)
+2. **Admins** (`ADMINS`): Can search all indexed groups (from `ALLOWED_GROUPS`), no admin command access
+3. **Regular Users**: Can only search groups listed in their `USER_GROUP_PERMISSIONS` entry
+4. **Privacy Filter**: Applied to all users except owner in private chat (blocks messages from opted-out users)
 
 **Privacy Settings (NEW):**
 - `PRIVACY_STORAGE`: Path to privacy data JSON file (default: "privacy_data.json")
@@ -127,11 +135,21 @@ Tests currently cover the argument parser for search query syntax.
 - Search results automatically filtered to exclude blocked users
 - Thread-safe operations with file-based persistence
 
-**Access Control** (`access_control.py`): Three-tier permission system
-- **Private Mode**: Only OWNER_ID can use the bot (default, most secure)
-- **Group Mode**: Bot works in whitelisted groups (`ALLOWED_GROUPS`) and for specific users (`ALLOWED_USERS`)
-- **Public Mode**: Anyone can use the bot (not recommended, no privacy protection)
-- Decorators: `@require_access` for general commands, `@require_owner` for admin commands
+**Access Control** (`access_control.py`): Multi-tier permission system with granular group access
+- **Bot Modes**:
+  - **Private Mode**: Only OWNER_ID can use the bot (default, most secure)
+  - **Group Mode**: Bot works in whitelisted groups (`ALLOWED_GROUPS`) and for specific users (`ALLOWED_USERS`)
+  - **Public Mode**: Anyone can use the bot (not recommended, no privacy protection)
+- **Permission Roles**:
+  - **Owner**: Full access to all groups, can run admin commands
+  - **Admins** (`ADMINS`): Can search all indexed groups, no admin command access
+  - **Regular Users**: Can only search groups listed in `USER_GROUP_PERMISSIONS`
+- **Group Filtering**: Search results are automatically filtered based on user's allowed groups
+  - Owner and admins: see all indexed groups
+  - Regular users: see only groups they have permission for
+  - Group chats: results automatically filtered to that specific group
+- **Decorators**: `@require_access` for general commands, `@require_owner` for admin commands
+- **Methods**: `is_owner()`, `is_admin()`, `get_allowed_groups_for_user()` for permission checks
 
 **Search Query Syntax** (parsed via `argparse` in `bot.py`):
 - `-t=TYPE`: Filter by chat type (GROUP, CHANNEL, PRIVATE, SUPERGROUP, BOT)
@@ -243,19 +261,51 @@ python searchgram/migrations/add_timestamp.py
 
 ## Group Mode Setup
 
-To enable the bot in groups:
+To enable the bot with granular group permissions in `config.json`:
 
-1. Set environment variables:
-```bash
-BOT_MODE=group
-ALLOWED_GROUPS=-1001234567890,-1009876543210
-ALLOWED_USERS=123456789,987654321
+### Example 1: Simple Group Mode (All users see all groups)
+```json
+{
+  "bot": {
+    "mode": "group",
+    "allowed_groups": [-1001234567890, -1009876543210],
+    "allowed_users": [123456789, 987654321],
+    "admins": [],
+    "user_group_permissions": {}
+  }
+}
 ```
+**Behavior**: All allowed users can search all indexed groups (backward compatible).
 
-2. Add bot to the group
-3. Users can search with the same syntax
+### Example 2: Admins + Per-User Permissions
+```json
+{
+  "bot": {
+    "mode": "group",
+    "allowed_groups": [-1001234567890, -1009876543210, -1005555555555],
+    "allowed_users": [123456789, 987654321, 333333333],
+    "admins": [111111111],
+    "user_group_permissions": {
+      "123456789": [-1001234567890],
+      "987654321": [-1009876543210, -1001234567890],
+      "333333333": [-1005555555555]
+    }
+  }
+}
+```
+**Behavior**:
+- **Owner** (from `OWNER_ID`): Can search all 3 groups
+- **Admin** (111111111): Can search all 3 groups
+- **User 123456789**: Can only search group -1001234567890
+- **User 987654321**: Can search groups -1009876543210 and -1001234567890
+- **User 333333333**: Can only search group -1005555555555
+
+### Setup Steps:
+1. Edit `config.json` with your desired permission structure
+2. Add bot to the groups
+3. Users can search with the same syntax (results filtered automatically)
 4. Search results show who requested them
-5. Anyone in the group can use `/block_me` for privacy
+5. Anyone can use `/block_me` for privacy
 
 ## Search Engine Notes
 

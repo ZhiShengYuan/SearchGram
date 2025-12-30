@@ -245,6 +245,11 @@ else:
 ALLOWED_GROUPS = _config_loader.get_list("bot.allowed_groups", [], item_type=int)
 ALLOWED_USERS = _config_loader.get_list("bot.allowed_users", [], item_type=int)
 
+# Enhanced permissions
+ADMINS = _config_loader.get_list("bot.admins", [], item_type=int)
+# User group permissions: dict mapping user_id (str) -> list of group_ids (int)
+USER_GROUP_PERMISSIONS = _config_loader.get_dict("bot.user_group_permissions", {})
+
 # Privacy settings
 PRIVACY_STORAGE = _config_loader.get("privacy.storage_file", "privacy_data.json")
 
@@ -270,6 +275,9 @@ if __name__ == "__main__":
     print(f"\nBot:")
     print(f"  MODE: {BOT_MODE}")
     print(f"  ALLOWED_GROUPS: {ALLOWED_GROUPS}")
+    print(f"  ALLOWED_USERS: {ALLOWED_USERS}")
+    print(f"  ADMINS: {ADMINS}")
+    print(f"  USER_GROUP_PERMISSIONS: {USER_GROUP_PERMISSIONS}")
     print(f"\nSync:")
     print(f"  ENABLED: {SYNC_ENABLED}")
     print(f"  BATCH_SIZE: {SYNC_BATCH_SIZE}")

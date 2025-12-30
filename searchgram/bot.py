@@ -478,7 +478,7 @@ def generate_navigation(page, total_pages):
     return markup
 
 
-def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_privacy_filter=True) -> Tuple[str, InlineKeyboardMarkup | None]:
+def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_privacy_filter=True, user_id=None) -> Tuple[str, InlineKeyboardMarkup | None]:
     """
     Parse search query and perform search.
 
@@ -488,6 +488,7 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
         requester_info: Requester information for display
         chat_id: Optional chat ID to filter results (for group-specific searches)
         apply_privacy_filter: Whether to filter out blocked users (False for admin in private chat)
+        user_id: User ID for permission-based group filtering
 
     Returns:
         Tuple of (result_text, inline_keyboard_markup)
@@ -513,6 +514,22 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
     # Skip filtering for admin in private chat to allow full search access
     if apply_privacy_filter:
         results = privacy_manager.filter_search_results(results)
+
+    # Filter results based on user group permissions
+    # Owner and admins see all groups, regular users see only their allowed groups
+    if user_id and not chat_id:  # Only apply if not already filtered to a specific chat
+        allowed_groups = access_controller.get_allowed_groups_for_user(user_id)
+        if allowed_groups:  # If user has specific group restrictions
+            # Filter hits to only include messages from allowed groups
+            original_hits = results.get("hits", [])
+            filtered_hits = [hit for hit in original_hits if hit.get("chat", {}).get("id") in allowed_groups]
+            results["hits"] = filtered_hits
+            # Update count to reflect filtered results
+            results["totalHits"] = len(filtered_hits)
+            # Recalculate pages based on filtered results
+            hits_per_page = results.get("hitsPerPage", 10)
+            results["totalPages"] = (len(filtered_hits) + hits_per_page - 1) // hits_per_page if hits_per_page > 0 else 1
+            logging.info(f"Filtered search results for user {user_id}: {len(original_hits)} -> {len(filtered_hits)} hits")
 
     text = parse_search_results(results)
     if not text:
@@ -586,7 +603,8 @@ async def search_command_handler(client: "Client", message: "types.Message"):
 
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    text, markup = parse_and_search(search_query, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
+    user_id = user.id if user else None
+    text, markup = parse_and_search(search_query, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
 
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
@@ -632,7 +650,8 @@ async def type_search_handler(client: "Client", message: "types.Message"):
 
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
+    user_id = user.id if user else None
+    text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
     sent_msg = await message.reply_text(
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
@@ -657,7 +676,8 @@ async def search_handler(client: "Client", message: "types.Message"):
 
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    text, markup = parse_and_search(message.text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
+    user_id = user.id if user else None
+    text, markup = parse_and_search(message.text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
 
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
@@ -723,7 +743,8 @@ async def send_method_callback(client: "Client", callback_query: types.CallbackQ
 
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
-    new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter)
+    user_id = user.id if user else None
+    new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
     await message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
 
     # Reschedule auto-deletion for the updated message (reset 120s timer) in groups only
