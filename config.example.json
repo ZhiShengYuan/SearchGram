@@ -46,6 +46,7 @@
   "search_engine": {
     "_comment": "Only 'http' engine is supported (legacy engines removed)",
     "engine": "http",
+    "_endpoint_comment": "Search service endpoint is configured in services.search.base_url",
     "batch": {
       "_comment": "Batch insert settings for improved performance",
       "enabled": true,
@@ -53,9 +54,7 @@
       "flush_interval": 1.0
     },
     "http": {
-      "base_url": "http://127.0.0.1:8080",
-      "_comment_api_key": "Legacy API key auth (deprecated, use JWT instead)",
-      "api_key": null,
+      "_comment": "HTTP client settings for search service communication (uses JWT auth from auth section)",
       "timeout": 30,
       "max_retries": 3
     }

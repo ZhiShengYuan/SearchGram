@@ -136,34 +136,12 @@ Search backend configuration with support for multiple engines.
 
 ```json
 "http": {
-  "base_url": "http://searchgram-engine:8080",
-  "api_key": null,
   "timeout": 30,
   "max_retries": 3
 }
 ```
 
-#### `base_url`
-- **Type**: String
-- **Required**: Yes (if using http engine)
-- **Description**: URL of the Go search service
-- **Examples**:
-  - Docker: `"http://searchgram-engine:8080"`
-  - Localhost: `"http://127.0.0.1:8080"`
-  - Remote: `"http://search.example.com:8080"`
-- **Notes**:
-  - Supports both HTTP and HTTPS
-  - HTTP/2 will be automatically used when available
-  - No trailing slash needed
-
-#### `api_key`
-- **Type**: String or null
-- **Required**: No
-- **Default**: `null` (no authentication)
-- **Description**: API key for authenticating with the Go search service
-- **Example**: `"605867f6-78a0-4b40-96b0-db734d037f95"`
-- **Security**: Set this if your Go service has `auth.enabled: true`
-- **Notes**: Must match the `auth.api_key` in the Go service's `config.yaml`
+**Note**: The search service endpoint is configured in `services.search.base_url`, not here. Authentication uses JWT from the `auth` section.
 
 #### `timeout`
 - **Type**: Integer
@@ -569,8 +547,6 @@ Owner can use in private chats, allowed users can use in private, bot works in w
   "search_engine": {
     "engine": "http",
     "http": {
-      "base_url": "http://searchgram-engine:8080",
-      "api_key": "secure-api-key-here",
       "timeout": 30,
       "max_retries": 3
     }
@@ -633,8 +609,6 @@ Traditional owner-only setup:
   "search_engine": {
     "engine": "http",
     "http": {
-      "base_url": "http://searchgram-engine:8080",
-      "api_key": "secure-api-key-here",
       "timeout": 30,
       "max_retries": 3
     }

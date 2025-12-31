@@ -28,7 +28,6 @@ class HTTPSearchEngine(BasicSearchEngine):
     def __init__(
         self,
         base_url: str,
-        api_key: Optional[str] = None,
         timeout: int = 30,
         max_retries: int = 3,
         jwt_auth: Optional[JWTAuth] = None,
@@ -37,14 +36,12 @@ class HTTPSearchEngine(BasicSearchEngine):
         Initialize HTTP/2 search engine client with connection pooling.
 
         Args:
-            base_url: Base URL of the Go search service (e.g., "http://searchgram-engine:8080")
-            api_key: Optional API key for authentication (legacy)
+            base_url: Base URL of the Go search service (e.g., "http://127.0.0.1:8080")
             timeout: Request timeout in seconds
             max_retries: Maximum number of retry attempts
-            jwt_auth: Optional JWT auth instance (recommended)
+            jwt_auth: JWT auth instance for authentication (required)
         """
         self.base_url = base_url.rstrip('/')
-        self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
         self.jwt_auth = jwt_auth
@@ -55,12 +52,11 @@ class HTTPSearchEngine(BasicSearchEngine):
             'Accept': 'application/json',
         }
 
-        # Use JWT if available, otherwise fall back to API key
+        # JWT authentication is required
         if self.jwt_auth:
-            logging.info("HTTP engine will use JWT authentication")
-        elif self.api_key:
-            headers['X-API-Key'] = self.api_key
-            logging.info("HTTP engine will use API key authentication (legacy)")
+            logging.info("HTTP engine initialized with JWT authentication")
+        else:
+            logging.warning("HTTP engine initialized without JWT authentication - requests may fail")
 
         # Create httpx client with HTTP/2 support and connection pooling
         # limits control connection pooling behavior
@@ -412,14 +408,14 @@ def SearchEngine(*args, **kwargs) -> HTTPSearchEngine:
     from searchgram.config_loader import get_config
 
     config = get_config()
-    base_url = config.get("search_engine.http.base_url", "http://searchgram-engine:8080")
-    api_key = config.get("search_engine.http.api_key")
+    # Use unified search service endpoint
+    base_url = config.get("services.search.base_url", "http://127.0.0.1:8080")
     timeout = config.get_int("search_engine.http.timeout", 30)
     max_retries = config.get_int("search_engine.http.max_retries", 3)
 
-    # Initialize JWT auth if configured
+    # Initialize JWT auth if configured (required)
     jwt_auth = None
-    use_jwt = config.get_bool("auth.use_jwt", False)
+    use_jwt = config.get_bool("auth.use_jwt", True)
     if use_jwt:
         try:
             issuer = config.get("auth.issuer", "bot")
@@ -441,13 +437,15 @@ def SearchEngine(*args, **kwargs) -> HTTPSearchEngine:
                     public_key_inline=public_key_inline,
                 )
                 logging.info("JWT authentication enabled for HTTP search engine")
+            else:
+                logging.error("JWT keys not configured properly")
+                raise ValueError("JWT authentication requires both private and public keys")
         except Exception as e:
             logging.error(f"Failed to initialize JWT auth: {e}")
-            logging.warning("Falling back to API key authentication")
+            raise ValueError(f"JWT authentication is required but initialization failed: {e}")
 
     return HTTPSearchEngine(
         base_url=base_url,
-        api_key=api_key,
         timeout=timeout,
         max_retries=max_retries,
         jwt_auth=jwt_auth,

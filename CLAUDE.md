@@ -32,16 +32,13 @@ The project has a **microservice architecture** with three main components:
    - Includes privacy controls: users can opt-out via `/block_me` command
    - Filters search results to exclude messages from blocked users
 
-**Search Engine Abstraction**: The project uses a plugin architecture via `searchgram/__init__.py` that dynamically loads search backends based on the `ENGINE` config:
-- `http` (recommended): Go search service via HTTP API - best performance, security, scalability
-- `meili`: MeiliSearch - typo-tolerant, fuzzy search (legacy, direct connection)
-- `mongo`: MongoDB - regex-based search with CJK conversion (legacy, direct connection)
-- `zinc`: ZincSearch - full-text search (legacy, direct connection)
-- `elastic`: Elasticsearch - CJK-optimized (legacy, direct connection)
+**Search Engine**: The project uses HTTP-based search via a Go microservice (`searchgram-engine/`). Configuration:
+- Only `engine: http` is supported (legacy engines removed for security and maintainability)
+- Search service endpoint: `services.search.base_url` (unified with other service endpoints)
+- Authentication: JWT-based (configured in `auth` section) - **required, no fallback**
+- The Go service handles Elasticsearch connection pooling, credentials, and CJK optimization internally
 
-**Recommended Setup**: Use `engine: http` to leverage the Go search service for better performance and security. The Go service handles Elasticsearch connection pooling, credentials, and optimization internally.
-
-All engines implement the `BasicSearchEngine` interface from `searchgram/engine.py` with methods: `upsert()`, `search()`, `ping()`, `clear_db()`, and `delete_user()`.
+The HTTP search engine implements the `BasicSearchEngine` interface from `searchgram/engine.py` with methods: `upsert()`, `search()`, `ping()`, `clear_db()`, `delete_user()`, and `dedup()`.
 
 ## Configuration
 
@@ -58,15 +55,12 @@ All configuration is managed by `searchgram/config_loader.py`:
 - `OWNER_ID`: User ID of the bot owner (always has full access)
 
 **Search Engine Settings:**
-- `ENGINE`: Search backend (`http`, `meili`, `mongo`, `zinc`, or `elastic`)
-- For `http` (recommended):
-  - `HTTP_BASE_URL`: Go search service URL (default: `http://searchgram-engine:8080`)
-  - `HTTP_API_KEY`: Optional API key for authentication
-  - `HTTP_TIMEOUT`: Request timeout in seconds (default: 30)
-  - `HTTP_MAX_RETRIES`: Max retry attempts (default: 3)
-- For legacy direct connections:
-  - `MEILI_HOST`, `MONGO_HOST`, `ZINC_HOST`, `ELASTIC_HOST`: Search engine endpoints
-  - `ELASTIC_USER`, `ELASTIC_PASS`: Elasticsearch authentication credentials
+- `ENGINE`: Search backend (only `http` is supported - legacy engines removed)
+- Search service endpoint: `services.search.base_url` (default: `http://127.0.0.1:8080`)
+- HTTP client settings:
+  - `search_engine.http.timeout`: Request timeout in seconds (default: 30)
+  - `search_engine.http.max_retries`: Max retry attempts (default: 3)
+- Authentication: Uses JWT from `auth` section (required)
 
 **Access Control:**
 - `BOT_MODE`: Access control mode - `private` (owner only), `group` (whitelisted groups), `public` (anyone)
@@ -463,24 +457,19 @@ To enable the bot with granular group permissions in `config.json`:
 
 ## Search Engine Notes
 
-- **MeiliSearch**: Configured with custom ranking rules prioritizing timestamp, supports typo tolerance, requires filterable attributes setup on `chat.id`, `chat.username`, `chat.type`
-- **MongoDB**: Uses regex search with `zhconv` library for simplified/traditional Chinese conversion
-- **Zinc**: Uses QueryString queries with bool filters, exact match mode not fully implemented
-- **Elasticsearch**: CJK-optimized with bigram tokenization, supports exact and fuzzy matching, advanced filtering on chat type/user, timestamp-based sorting. Uses custom analyzers for optimal Chinese/Japanese/Korean text search performance. Recommended for high-volume deployments and best search quality.
+SearchGram uses an HTTP-based search architecture with a dedicated Go microservice:
 
-All search results return a standardized dict format with `hits`, `totalHits`, `totalPages`, `page`, `hitsPerPage` keys.
+- **HTTP Search Engine** (`searchgram/http_engine.py`):
+  - Communicates with Go microservice via RESTful HTTP/2 API
+  - Endpoint configured via `services.search.base_url` (default: `http://127.0.0.1:8080`)
+  - **Authentication**: JWT-based using Ed25519 keys (required, no API key fallback)
+  - Features: Connection pooling, automatic retries, batch operations
+  - All search results return a standardized dict format with `hits`, `totalHits`, `totalPages`, `page`, `hitsPerPage` keys
 
-### Elasticsearch Configuration
-
-Elasticsearch implementation includes:
-- **CJK Bigram Tokenization**: Optimized for Chinese, Japanese, Korean text
-- **Dual Analyzers**: CJK analyzer for fuzzy search + exact analyzer for phrase matching
-- **Filterable Fields**: Chat ID, username, type for precise filtering
-- **Performance Tuning**: Configurable sharding, replica settings, and deep pagination support
-- **Index Settings**: Automatic index creation with proper mappings on first run
-- **Security**: Supports basic authentication (username/password)
-
-Environment variables for Elasticsearch:
-- `ELASTIC_HOST`: Elasticsearch endpoint (default: `http://elasticsearch:9200`)
-- `ELASTIC_USER`: Username for authentication (default: `elastic`)
-- `ELASTIC_PASS`: Password for authentication (default: `changeme`)
+- **Go Search Service** (`searchgram-engine/`):
+  - Elasticsearch backend with CJK optimization
+  - CJK Bigram Tokenization for Chinese, Japanese, Korean text
+  - Dual analyzers: CJK analyzer for fuzzy search + exact analyzer for phrase matching
+  - Filterable fields: Chat ID, username, type for precise filtering
+  - Performance tuning: Configurable sharding, replica settings, deep pagination support
+  - Security: Credentials isolated in Go service, JWT authentication required for API access
