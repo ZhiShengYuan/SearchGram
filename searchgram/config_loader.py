@@ -253,6 +253,10 @@ USER_GROUP_PERMISSIONS = _config_loader.get_dict("bot.user_group_permissions", {
 # Privacy settings
 PRIVACY_STORAGE = _config_loader.get("privacy.storage_file", "privacy_data.json")
 
+# Database settings
+DATABASE_PATH = _config_loader.get("database.path", "searchgram_logs.db")
+DATABASE_ENABLED = _config_loader.get_bool("database.enabled", True)
+
 # Sync settings
 SYNC_ENABLED = _config_loader.get_bool("sync.enabled", True)
 SYNC_CHECKPOINT_FILE = _config_loader.get("sync.checkpoint_file", "sync_progress.json")
@@ -263,6 +267,27 @@ SYNC_RESUME_ON_RESTART = _config_loader.get_bool("sync.resume_on_restart", True)
 SYNC_DELAY_BETWEEN_BATCHES = _config_loader.get_float("sync.delay_between_batches", 1.0)
 SYNC_CLEAR_COMPLETED = _config_loader.get_bool("sync.clear_completed", False)
 
+# Service endpoints (for inter-service communication)
+SERVICE_BOT_URL = _config_loader.get("services.bot.base_url", "http://127.0.0.1:8081")
+SERVICE_USERBOT_URL = _config_loader.get("services.userbot.base_url", "http://127.0.0.1:8082")
+SERVICE_SEARCH_URL = _config_loader.get("services.search.base_url", "http://127.0.0.1:8080")
+
+# Authentication settings (JWT)
+AUTH_USE_JWT = _config_loader.get_bool("auth.use_jwt", True)
+AUTH_ISSUER = _config_loader.get("auth.issuer", "bot")
+AUTH_AUDIENCE = _config_loader.get("auth.audience", "internal")
+AUTH_PUBLIC_KEY_PATH = _config_loader.get("auth.public_key_path", "keys/public.key")
+AUTH_PRIVATE_KEY_PATH = _config_loader.get("auth.private_key_path", "keys/private.key")
+AUTH_TOKEN_TTL = _config_loader.get_int("auth.token_ttl", 300)
+
+# HTTP server settings
+HTTP_LISTEN_HOST = _config_loader.get("http.listen", "127.0.0.1")
+HTTP_BOT_PORT = _config_loader.get_int("http.bot_port", 8081)
+HTTP_USERBOT_PORT = _config_loader.get_int("http.userbot_port", 8082)
+HTTP_SEARCH_PORT = _config_loader.get_int("http.search_port", 8080)
+HTTP_MESSAGE_QUEUE_DB = _config_loader.get("http.message_queue_db", "message_queue.db")
+HTTP_CLEANUP_INTERVAL_HOURS = _config_loader.get_int("http.cleanup_interval_hours", 24)
+
 
 if __name__ == "__main__":
     # Test configuration loading
@@ -272,6 +297,18 @@ if __name__ == "__main__":
     print(f"  OWNER_ID: {OWNER_ID}")
     print(f"\nSearch Engine:")
     print(f"  ENGINE: {ENGINE}")
+    print(f"\nServices:")
+    print(f"  Bot: {SERVICE_BOT_URL}")
+    print(f"  Userbot: {SERVICE_USERBOT_URL}")
+    print(f"  Search: {SERVICE_SEARCH_URL}")
+    print(f"\nAuth:")
+    print(f"  USE_JWT: {AUTH_USE_JWT}")
+    print(f"  ISSUER: {AUTH_ISSUER}")
+    print(f"  PUBLIC_KEY: {AUTH_PUBLIC_KEY_PATH}")
+    print(f"\nHTTP Server:")
+    print(f"  LISTEN: {HTTP_LISTEN_HOST}")
+    print(f"  BOT_PORT: {HTTP_BOT_PORT}")
+    print(f"  USERBOT_PORT: {HTTP_USERBOT_PORT}")
     print(f"\nBot:")
     print(f"  MODE: {BOT_MODE}")
     print(f"  ALLOWED_GROUPS: {ALLOWED_GROUPS}")

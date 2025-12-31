@@ -81,8 +81,12 @@ All configuration is managed by `searchgram/config_loader.py`:
 3. **Regular Users**: Can only search groups listed in their `USER_GROUP_PERMISSIONS` entry
 4. **Privacy Filter**: Applied to all users except owner in private chat (blocks messages from opted-out users)
 
-**Privacy Settings (NEW):**
+**Privacy Settings:**
 - `PRIVACY_STORAGE`: Path to privacy data JSON file (default: "privacy_data.json")
+
+**Database Settings (Query Logging):**
+- `DATABASE_ENABLED`: Enable SQLite query logging (default: `true`)
+- `DATABASE_PATH`: Path to SQLite database file (default: "searchgram_logs.db")
 
 **Sync Settings:**
 - `SYNC_ENABLED`: Enable background sync (default: `true`)
@@ -192,9 +196,13 @@ Tests currently cover the argument parser for search query syntax.
 - `/privacy_status` - Check your current privacy status
 
 **Admin Commands (Owner Only):**
-- `/ping` - Check bot health and database stats
+- `/ping` - Comprehensive bot health check: search engine status, total messages, privacy stats, query logs, bot configuration
 - `/dedup` - Remove duplicate messages from database (requires `ENGINE=http`)
 - `/delete` - Delete messages from specific chat
+- `/logs [limit]` - View recent query logs (default: 20, max: 100)
+- `/logstats` - View query log statistics
+- `/settings [key] [value]` - View or update database settings
+- `/cleanup_logs` - Clean up old query logs based on retention settings
 
 **Search Syntax:**
 - Global search: Just send any text message
@@ -239,6 +247,152 @@ The bot will show:
 - Thread-safe operation with status updates
 
 **Note:** The upsert operations are designed to be idempotent (using document IDs), so duplicates should be rare. However, this command provides a way to manually clean up the database if needed.
+
+## Query Logging System
+
+SearchGram includes a **SQLite-based query logging system** (`db_manager.py`) that tracks all search queries with detailed metadata and configurable settings.
+
+### Features
+
+**Query Logs Table** (`query_logs`):
+- Timestamp, user ID, username, first name
+- Chat ID and type (PRIVATE/GROUP)
+- Search query and filters (type, user, mode)
+- Results count, page number, processing time
+- Indexed for fast lookups by timestamp, user_id, chat_id
+
+**Admin Settings Table** (`admin_settings`):
+- Runtime-configurable settings stored in database
+- Type-aware (bool, int, float, str, json)
+- Tracks who updated settings and when
+
+**Default Settings:**
+- `enable_query_logging`: Enable/disable logging (default: `true`)
+- `log_retention_days`: Days to keep logs (default: `30`)
+- `max_log_entries`: Maximum log entries (default: `100000`)
+- `auto_cleanup_enabled`: Auto cleanup old logs (default: `true`)
+
+### Admin Commands
+
+**View Logs:**
+```bash
+/logs              # Last 20 queries
+/logs 50           # Last 50 queries
+/logs 123456       # All queries from user 123456
+```
+
+**View Statistics:**
+```bash
+/logstats          # Shows:
+                   # - Total queries, 24h queries
+                   # - Average results and time
+                   # - Top users
+                   # - Breakdown by chat type
+```
+
+**Manage Settings:**
+```bash
+/settings                              # View all settings
+/settings enable_query_logging false   # Disable logging
+/settings log_retention_days 60        # Keep logs for 60 days
+/settings max_log_entries 200000       # Increase max entries
+```
+
+**Cleanup Logs:**
+```bash
+/cleanup_logs      # Remove old logs based on:
+                   # - log_retention_days setting
+                   # - max_log_entries setting
+```
+
+### Implementation Details
+
+**Thread-Safe:** Connection pooling per thread via `threading.local()`
+**Automatic Indexing:** Indexes on timestamp, user_id, chat_id for fast queries
+**Error Handling:** Logging failures don't crash the bot
+**Type Conversion:** Settings automatically converted to appropriate types
+
+**Logging Happens When:**
+- Every search query (private, group, type-specific)
+- Pagination (page number tracked)
+- After privacy and permission filtering
+- Processing time measured and recorded
+
+**Privacy Considerations:**
+- Only owner can view logs (admin-only commands)
+- Can be completely disabled via `DATABASE_ENABLED=false` in config
+- Logs stored locally in SQLite file
+- Configurable retention and limits
+
+### Database Schema
+
+```sql
+CREATE TABLE query_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    user_id INTEGER NOT NULL,
+    username TEXT,
+    first_name TEXT,
+    chat_id INTEGER NOT NULL,
+    chat_type TEXT NOT NULL,
+    query TEXT NOT NULL,
+    search_type TEXT,
+    search_user TEXT,
+    search_mode TEXT,
+    results_count INTEGER,
+    page_number INTEGER DEFAULT 1,
+    processing_time_ms INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE admin_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    value_type TEXT NOT NULL,
+    description TEXT,
+    updated_at REAL NOT NULL,
+    updated_by INTEGER NOT NULL
+);
+```
+
+## Bot Health Monitoring
+
+The `/ping` command provides comprehensive system health information for bot administrators.
+
+**Example Output:**
+```
+🏓 Pong!
+
+Search Engine: http
+Status: healthy
+📊 Total Messages: 125,430
+
+🔐 Privacy: 3 user(s) opted out
+
+📝 Query Logs:
+  • Total Queries: 1,245
+  • Last 24h: 87
+  • Avg Time: 125ms
+
+⚙️ Bot Configuration:
+  • Mode: group
+  • Allowed Groups: 5
+  • Allowed Users: 12
+  • Admins: 2
+```
+
+**Information Shown:**
+- **Search Engine Status:** Engine type (http, elastic, etc.) and health status
+- **Total Messages:** Count of all indexed messages in the database
+- **Privacy Stats:** Number of users who opted out via `/block_me`
+- **Query Logs:** Total queries, last 24h activity, average processing time
+- **Bot Configuration:** Access mode, allowed groups/users, admin count
+
+**Use Cases:**
+- Quick health check before maintenance
+- Monitor database growth
+- Track user activity and query performance
+- Verify permissions configuration
 
 ## Common Development Commands
 

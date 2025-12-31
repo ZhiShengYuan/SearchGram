@@ -1,0 +1,40 @@
+# SearchGram Search Engine Configuration
+# Go microservice settings
+
+server:
+  host: "127.0.0.1"  # Listen on localhost by default for security
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+
+search_engine:
+  type: "elasticsearch"  # Currently only elasticsearch is supported
+
+elasticsearch:
+  host: "http://localhost:9200"
+  username: "elastic"
+  password: "changeme"
+  index: "telegram"
+  shards: 3
+  replicas: 1
+
+auth:
+  # Legacy API key authentication (deprecated)
+  enabled: false
+  api_key: ""
+
+  # JWT authentication (recommended)
+  use_jwt: true
+  issuer: "search"
+  audience: "internal"
+  public_key_path: "keys/public.key"
+  private_key_path: "keys/private.key"
+  token_ttl: 300  # seconds
+
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json or text
+
+cache:
+  enabled: false
+  ttl: 300s

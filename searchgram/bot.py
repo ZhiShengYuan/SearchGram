@@ -19,7 +19,8 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from . import SearchEngine
 from .access_control import require_access, require_owner, access_controller
-from .config_loader import BOT_MODE, TOKEN
+from .config_loader import BOT_MODE, DATABASE_ENABLED, DATABASE_PATH, TOKEN
+from .db_manager import get_db_manager
 from .init_client import get_client
 from .privacy import privacy_manager
 from .utils import setup_logger
@@ -28,6 +29,9 @@ tgdb = SearchEngine()
 
 setup_logger()
 app = get_client(TOKEN)
+
+# Initialize database manager for query logging
+db_manager = get_db_manager(DATABASE_PATH) if DATABASE_ENABLED else None
 chat_types = [i for i in dir(enums.ChatType) if not i.startswith("_")]
 parser = argparse.ArgumentParser()
 parser.add_argument("keyword", help="the keyword to be searched")
@@ -129,9 +133,13 @@ def help_handler(client: "Client", message: "types.Message"):
 - `/privacy_status` - Check your current privacy status
 
 {f'''**🛠️ Admin Commands (Owner Only):**
-- `/ping` - Check bot health and database stats
+- `/ping` - Comprehensive health check (engine, messages, privacy, logs, config)
 - `/dedup` - Remove duplicate messages from database
 - `/delete` - Delete messages from specific chat
+- `/logs [limit]` - View recent query logs
+- `/logstats` - View query statistics
+- `/settings [key] [value]` - View/update database settings
+- `/cleanup_logs` - Clean up old query logs
 ''' if access_controller.is_owner(user.id if user else 0) else ''}
 **⚙️ Bot Mode:** {BOT_MODE}
 {f"**Blocked Users:** {privacy_manager.get_blocked_count()}" if access_controller.is_owner(user.id if user else 0) else ""}
@@ -146,8 +154,47 @@ This bot indexes messages for search. Use `/block_me` anytime to remove yourself
 @require_owner
 def ping_handler(client: "Client", message: "types.Message"):
     client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    text = tgdb.ping()
-    text += f"\n🔐 Privacy: {privacy_manager.get_blocked_count()} users opted out"
+
+    # Get search engine stats
+    ping_result = tgdb.ping()
+
+    # Handle both dict (http_engine) and string (other engines) responses
+    if isinstance(ping_result, dict):
+        # HTTP engine returns dict with structured data
+        status = ping_result.get("status", "unknown")
+        engine = ping_result.get("engine", "unknown")
+        total_docs = ping_result.get("total_documents", 0)
+
+        text = f"🏓 **Pong!**\n\n"
+        text += f"**Search Engine:** {engine}\n"
+        text += f"**Status:** {status}\n"
+        text += f"**📊 Total Messages:** {total_docs:,}\n"
+    else:
+        # Other engines return formatted string
+        text = ping_result
+
+    # Add privacy stats
+    blocked_count = privacy_manager.get_blocked_count()
+    text += f"\n🔐 **Privacy:** {blocked_count} user(s) opted out"
+
+    # Add database query log stats if enabled
+    if db_manager:
+        try:
+            stats = db_manager.get_statistics()
+            text += f"\n\n**📝 Query Logs:**"
+            text += f"\n  • Total Queries: {stats['total_queries']:,}"
+            text += f"\n  • Last 24h: {stats['queries_24h']:,}"
+            text += f"\n  • Avg Time: {stats['avg_processing_time_ms']:.0f}ms"
+        except Exception as e:
+            logging.error(f"Error getting database stats: {e}")
+
+    # Add bot mode and permissions info
+    text += f"\n\n**⚙️ Bot Configuration:**"
+    text += f"\n  • Mode: {BOT_MODE}"
+    text += f"\n  • Allowed Groups: {len(access_controller.allowed_groups)}"
+    text += f"\n  • Allowed Users: {len(access_controller.allowed_users)}"
+    text += f"\n  • Admins: {len(access_controller.admins)}"
+
     client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
 
 
@@ -478,7 +525,7 @@ def generate_navigation(page, total_pages):
     return markup
 
 
-def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_privacy_filter=True, user_id=None) -> Tuple[str, InlineKeyboardMarkup | None]:
+def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_privacy_filter=True, user_id=None, user_obj=None) -> Tuple[str, InlineKeyboardMarkup | None]:
     """
     Parse search query and perform search.
 
@@ -489,6 +536,7 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
         chat_id: Optional chat ID to filter results (for group-specific searches)
         apply_privacy_filter: Whether to filter out blocked users (False for admin in private chat)
         user_id: User ID for permission-based group filtering
+        user_obj: Pyrogram User object for logging
 
     Returns:
         Tuple of (result_text, inline_keyboard_markup)
@@ -498,6 +546,10 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
         return "Invalid page number. Page must be greater than 0.", None
     if page > MAX_PAGE:
         return f"Page number too high. Maximum allowed page is {MAX_PAGE}.", None
+
+    # Start timing for query logging
+    import time
+    start_time = time.time()
 
     args = parser.parse_args(text.split())
     _type = args.type
@@ -555,6 +607,28 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
     header += "\n"
 
     markup = generate_navigation(page, total_pages)
+
+    # Log query to database
+    if db_manager and user_id and user_obj:
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        try:
+            db_manager.log_query(
+                user_id=user_id,
+                username=user_obj.username if user_obj else None,
+                first_name=user_obj.first_name if user_obj else None,
+                chat_id=chat_id if chat_id else 0,  # 0 for private/global search
+                chat_type="PRIVATE" if not chat_id else "GROUP",
+                query=keyword,
+                search_type=_type,
+                search_user=user,
+                search_mode=mode,
+                results_count=total_hits,
+                page_number=page,
+                processing_time_ms=processing_time_ms
+            )
+        except Exception as e:
+            logging.error(f"Failed to log query: {e}")
+
     return f"{header}{text}", markup
 
 
@@ -604,7 +678,7 @@ async def search_command_handler(client: "Client", message: "types.Message"):
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     user_id = user.id if user else None
-    text, markup = parse_and_search(search_query, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
+    text, markup = parse_and_search(search_query, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id, user_obj=user)
 
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
@@ -651,7 +725,7 @@ async def type_search_handler(client: "Client", message: "types.Message"):
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     user_id = user.id if user else None
-    text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
+    text, markup = parse_and_search(refined_text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id, user_obj=user)
     sent_msg = await message.reply_text(
         text, quote=True, parse_mode=enums.ParseMode.MARKDOWN, reply_markup=markup, disable_web_page_preview=True
     )
@@ -677,7 +751,7 @@ async def search_handler(client: "Client", message: "types.Message"):
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     user_id = user.id if user else None
-    text, markup = parse_and_search(message.text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
+    text, markup = parse_and_search(message.text, requester_info=requester_info, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id, user_obj=user)
 
     if len(text) > 4096:
         logging.warning("Message too long, sending as file instead")
@@ -744,12 +818,225 @@ async def send_method_callback(client: "Client", callback_query: types.CallbackQ
     # In groups, filter search results to only this group
     group_chat_id = message.chat.id if message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP] else None
     user_id = user.id if user else None
-    new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id)
+    new_text, new_markup = parse_and_search(refined_text, new_page, chat_id=group_chat_id, apply_privacy_filter=apply_privacy_filter, user_id=user_id, user_obj=user)
     await message.edit_text(new_text, reply_markup=new_markup, disable_web_page_preview=True)
 
     # Reschedule auto-deletion for the updated message (reset 120s timer) in groups only
     if new_markup and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         asyncio.create_task(schedule_message_deletion(client, message.chat.id, message.id))
+
+
+@app.on_message(filters.command(["logs", "query_logs"]))
+@require_owner
+async def logs_handler(client: "Client", message: "types.Message"):
+    """View recent query logs (owner only)."""
+    if not db_manager:
+        await message.reply_text("❌ Database logging is disabled.", quote=True)
+        return
+
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        # Parse command arguments
+        parts = message.text.split(maxsplit=2)
+        limit = 20  # Default limit
+        user_filter = None
+
+        # Check for user filter: /logs @username or /logs 123456
+        if len(parts) >= 2:
+            try:
+                # Try parsing as user ID
+                user_filter = int(parts[1])
+            except ValueError:
+                # Try parsing as limit
+                try:
+                    limit = int(parts[1])
+                    limit = min(limit, 100)  # Cap at 100
+                except ValueError:
+                    pass
+
+        logs = db_manager.get_recent_logs(limit=limit, user_id=user_filter)
+
+        if not logs:
+            await message.reply_text("📊 No query logs found.", quote=True)
+            return
+
+        # Format logs
+        response = f"📊 **Query Logs** (showing {len(logs)} most recent)\n\n"
+
+        for log in logs:
+            timestamp = datetime.fromtimestamp(log['timestamp'])
+            username = log['username'] or log['first_name'] or f"ID:{log['user_id']}"
+            query = log['query'][:50] + "..." if len(log['query']) > 50 else log['query']
+            results = log['results_count']
+            time_ms = log['processing_time_ms']
+
+            response += f"**{timestamp.strftime('%Y-%m-%d %H:%M')}** - {username}\n"
+            response += f"  Query: `{query}`\n"
+            if log['search_type']:
+                response += f"  Type: {log['search_type']}"
+            if log['search_user']:
+                response += f", User: {log['search_user']}"
+            if log['search_mode']:
+                response += f", Mode: {log['search_mode']}"
+            response += f"\n  Results: {results}, Time: {time_ms}ms\n\n"
+
+        if len(response) > 4096:
+            # Send as file if too long
+            file = BytesIO(response.encode())
+            file.name = "query_logs.txt"
+            await message.reply_document(file, quote=True, caption="Query logs (too long for message)")
+            file.close()
+        else:
+            await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logging.exception("Error retrieving logs")
+        await message.reply_text(f"❌ Error retrieving logs: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["logstats", "log_stats"]))
+@require_owner
+async def logstats_handler(client: "Client", message: "types.Message"):
+    """View query log statistics (owner only)."""
+    if not db_manager:
+        await message.reply_text("❌ Database logging is disabled.", quote=True)
+        return
+
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        stats = db_manager.get_statistics()
+
+        response = "📈 **Query Log Statistics**\n\n"
+        response += f"**Total Queries:** {stats['total_queries']:,}\n"
+        response += f"**Queries (24h):** {stats['queries_24h']:,}\n"
+        response += f"**Avg Results:** {stats['avg_results_per_query']:.1f}\n"
+        response += f"**Avg Time:** {stats['avg_processing_time_ms']:.0f}ms\n\n"
+
+        if stats['top_users']:
+            response += "**Top Users:**\n"
+            for user in stats['top_users'][:5]:
+                username = user['username'] or user['first_name'] or f"ID:{user['user_id']}"
+                response += f"  • {username}: {user['count']:,} queries\n"
+            response += "\n"
+
+        if stats['by_chat_type']:
+            response += "**By Chat Type:**\n"
+            for chat_type in stats['by_chat_type']:
+                response += f"  • {chat_type['chat_type']}: {chat_type['count']:,}\n"
+
+        await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logging.exception("Error retrieving statistics")
+        await message.reply_text(f"❌ Error retrieving statistics: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["settings", "db_settings"]))
+@require_owner
+async def settings_handler(client: "Client", message: "types.Message"):
+    """View or update database settings (owner only)."""
+    if not db_manager:
+        await message.reply_text("❌ Database logging is disabled.", quote=True)
+        return
+
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        parts = message.text.split(maxsplit=2)
+
+        # View all settings
+        if len(parts) == 1:
+            settings = db_manager.get_all_settings()
+            response = "⚙️ **Database Settings**\n\n"
+
+            for key, info in settings.items():
+                value = info['value']
+                desc = info['description']
+                updated = datetime.fromtimestamp(info['updated_at']).strftime('%Y-%m-%d %H:%M')
+                response += f"**{key}:** `{value}`\n"
+                if desc:
+                    response += f"  _{desc}_\n"
+                response += f"  Last updated: {updated}\n\n"
+
+            response += "\n💡 **Usage:**\n"
+            response += "`/settings <key> <value>` - Update a setting\n"
+            response += "`/settings enable_query_logging true` - Example\n"
+
+            await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+        # Update setting
+        elif len(parts) == 3:
+            key = parts[1]
+            value_str = parts[2]
+
+            # Parse value based on type
+            if value_str.lower() in ('true', 'false'):
+                value = value_str.lower() == 'true'
+            else:
+                try:
+                    value = int(value_str)
+                except ValueError:
+                    try:
+                        value = float(value_str)
+                    except ValueError:
+                        value = value_str
+
+            user_id = message.from_user.id
+            db_manager.set_setting(key, value, updated_by=user_id)
+
+            await message.reply_text(
+                f"✅ Setting updated:\n**{key}** = `{value}`",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+
+        else:
+            await message.reply_text(
+                "Usage:\n"
+                "`/settings` - View all settings\n"
+                "`/settings <key> <value>` - Update setting",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+
+    except Exception as e:
+        logging.exception("Error managing settings")
+        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["cleanup_logs"]))
+@require_owner
+async def cleanup_logs_handler(client: "Client", message: "types.Message"):
+    """Cleanup old query logs (owner only)."""
+    if not db_manager:
+        await message.reply_text("❌ Database logging is disabled.", quote=True)
+        return
+
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        # Cleanup old logs based on retention setting
+        deleted_old = db_manager.cleanup_old_logs()
+        # Cleanup excess logs based on max entries setting
+        deleted_excess = db_manager.cleanup_excess_logs()
+
+        total_deleted = deleted_old + deleted_excess
+
+        response = "🧹 **Log Cleanup Complete**\n\n"
+        response += f"Deleted old logs: {deleted_old}\n"
+        response += f"Deleted excess logs: {deleted_excess}\n"
+        response += f"**Total removed:** {total_deleted}\n\n"
+
+        stats = db_manager.get_statistics()
+        response += f"Remaining logs: {stats['total_queries']:,}"
+
+        await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logging.exception("Error cleaning up logs")
+        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
 
 
 if __name__ == "__main__":

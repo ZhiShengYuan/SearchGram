@@ -44,8 +44,17 @@ type ElasticsearchConfig struct {
 
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
+	// Legacy API key auth (deprecated)
 	Enabled bool   `mapstructure:"enabled"`
 	APIKey  string `mapstructure:"api_key"`
+
+	// JWT auth (recommended)
+	UseJWT         bool   `mapstructure:"use_jwt"`
+	Issuer         string `mapstructure:"issuer"`
+	Audience       string `mapstructure:"audience"`
+	PublicKeyPath  string `mapstructure:"public_key_path"`
+	PrivateKeyPath string `mapstructure:"private_key_path"`
+	TokenTTL       int    `mapstructure:"token_ttl"` // seconds
 }
 
 // LoggingConfig holds logging configuration
@@ -125,6 +134,12 @@ func setDefaults(v *viper.Viper) {
 	// Auth defaults
 	v.SetDefault("auth.enabled", false)
 	v.SetDefault("auth.api_key", "")
+	v.SetDefault("auth.use_jwt", true)
+	v.SetDefault("auth.issuer", "search")
+	v.SetDefault("auth.audience", "internal")
+	v.SetDefault("auth.public_key_path", "keys/public.key")
+	v.SetDefault("auth.private_key_path", "keys/private.key")
+	v.SetDefault("auth.token_ttl", 300)
 
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
@@ -166,6 +181,19 @@ func (c *Config) Validate() error {
 	// Validate auth config
 	if c.Auth.Enabled && c.Auth.APIKey == "" {
 		return fmt.Errorf("API key is required when auth is enabled")
+	}
+
+	// Validate JWT config
+	if c.Auth.UseJWT {
+		if c.Auth.Issuer == "" {
+			return fmt.Errorf("JWT issuer is required when JWT auth is enabled")
+		}
+		if c.Auth.Audience == "" {
+			return fmt.Errorf("JWT audience is required when JWT auth is enabled")
+		}
+		if c.Auth.PublicKeyPath == "" {
+			return fmt.Errorf("JWT public key path is required when JWT auth is enabled")
+		}
 	}
 
 	return nil

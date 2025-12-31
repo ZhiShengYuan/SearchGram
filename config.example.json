@@ -8,7 +8,38 @@
     "proxy": null,
     "ipv6": false
   },
+  "services": {
+    "_comment": "Inter-service communication endpoints (RESTful HTTP APIs)",
+    "bot": {
+      "base_url": "http://127.0.0.1:8081"
+    },
+    "userbot": {
+      "base_url": "http://127.0.0.1:8082"
+    },
+    "search": {
+      "base_url": "http://127.0.0.1:8080"
+    }
+  },
+  "auth": {
+    "_comment": "JWT authentication for inter-service communication (Ed25519)",
+    "use_jwt": true,
+    "issuer": "bot",
+    "audience": "internal",
+    "public_key_path": "keys/public.key",
+    "private_key_path": "keys/private.key",
+    "token_ttl": 300
+  },
+  "http": {
+    "_comment": "HTTP server settings for bot/userbot services",
+    "listen": "127.0.0.1",
+    "bot_port": 8081,
+    "userbot_port": 8082,
+    "search_port": 8080,
+    "message_queue_db": "message_queue.db",
+    "cleanup_interval_hours": 24
+  },
   "search_engine": {
+    "_comment": "Only 'http' engine is supported (legacy engines removed)",
     "engine": "http",
     "batch": {
       "_comment": "Batch insert settings for improved performance",
@@ -17,28 +48,11 @@
       "flush_interval": 1.0
     },
     "http": {
-      "base_url": "http://searchgram-engine:8080",
+      "base_url": "http://127.0.0.1:8080",
+      "_comment_api_key": "Legacy API key auth (deprecated, use JWT instead)",
       "api_key": null,
       "timeout": 30,
       "max_retries": 3
-    },
-    "meili": {
-      "host": "http://meili:7700",
-      "master_key": null
-    },
-    "mongo": {
-      "host": "mongo",
-      "port": 27017
-    },
-    "zinc": {
-      "host": "http://zinc:4080",
-      "user": "root",
-      "password": "root"
-    },
-    "elastic": {
-      "host": "http://elasticsearch:9200",
-      "user": "elastic",
-      "password": "changeme"
     }
   },
   "bot": {
@@ -68,6 +82,11 @@
   },
   "privacy": {
     "storage_file": "privacy_data.json"
+  },
+  "database": {
+    "enabled": true,
+    "path": "searchgram_logs.db",
+    "_comment": "SQLite database for query logs and admin settings. Disable if you don't want query logging."
   },
   "sync": {
     "enabled": true,

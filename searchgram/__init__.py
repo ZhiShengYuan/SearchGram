@@ -6,22 +6,15 @@
 
 from .config_loader import ENGINE
 
-AVAILABLE_ENGINES = ["meili", "mongo", "zinc", "elastic", "http"]
+# Only HTTP search engine is supported (via Go microservice)
+AVAILABLE_ENGINES = ["http"]
 
-if ENGINE == "meili":
-    print("Using MeiliSearch as search engine")
-    from .meili import SearchEngine
-elif ENGINE == "mongo":
-    print("Using MongoDB as search engine")
-    from .mongo import SearchEngine
-elif ENGINE == "zinc":
-    print("Using Zinc as search engine")
-    from .zinc import SearchEngine
-elif ENGINE == "elastic":
-    print("Using Elasticsearch as search engine")
-    from .elastic import SearchEngine
-elif ENGINE == "http":
-    print("Using HTTP (Go service) as search engine")
+if ENGINE == "http":
+    print("✅ Using HTTP (Go service) search engine with JWT authentication")
     from .http_engine import SearchEngine
 else:
-    raise ValueError(f"Unsupported engine {ENGINE}, available engines are {AVAILABLE_ENGINES}")
+    raise ValueError(
+        f"Unsupported engine '{ENGINE}'. Only 'http' engine is supported.\n"
+        f"Legacy engines (meili, mongo, zinc, elastic) have been removed.\n"
+        f"Please update your config.json to use: \"engine\": \"http\""
+    )

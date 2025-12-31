@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from searchgram.engine import BasicSearchEngine
+from searchgram.jwt_utils import JWTAuth
 
 
 class HTTPSearchEngine(BasicSearchEngine):
@@ -24,20 +25,29 @@ class HTTPSearchEngine(BasicSearchEngine):
     and connection pooling (remux).
     """
 
-    def __init__(self, base_url: str, api_key: Optional[str] = None, timeout: int = 30, max_retries: int = 3):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: Optional[str] = None,
+        timeout: int = 30,
+        max_retries: int = 3,
+        jwt_auth: Optional[JWTAuth] = None,
+    ):
         """
         Initialize HTTP/2 search engine client with connection pooling.
 
         Args:
             base_url: Base URL of the Go search service (e.g., "http://searchgram-engine:8080")
-            api_key: Optional API key for authentication
+            api_key: Optional API key for authentication (legacy)
             timeout: Request timeout in seconds
             max_retries: Maximum number of retry attempts
+            jwt_auth: Optional JWT auth instance (recommended)
         """
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
+        self.jwt_auth = jwt_auth
 
         # Prepare headers
         headers = {
@@ -45,8 +55,12 @@ class HTTPSearchEngine(BasicSearchEngine):
             'Accept': 'application/json',
         }
 
-        if self.api_key:
+        # Use JWT if available, otherwise fall back to API key
+        if self.jwt_auth:
+            logging.info("HTTP engine will use JWT authentication")
+        elif self.api_key:
             headers['X-API-Key'] = self.api_key
+            logging.info("HTTP engine will use API key authentication (legacy)")
 
         # Create httpx client with HTTP/2 support and connection pooling
         # limits control connection pooling behavior
@@ -121,6 +135,17 @@ class HTTPSearchEngine(BasicSearchEngine):
 
         # Use custom timeout if provided
         request_timeout = httpx.Timeout(timeout) if timeout else None
+
+        # Add JWT token if available
+        if self.jwt_auth:
+            try:
+                token = self.jwt_auth.generate_token(target_audience="internal")
+                if "headers" not in kwargs:
+                    kwargs["headers"] = {}
+                kwargs["headers"]["Authorization"] = f"Bearer {token}"
+            except Exception as e:
+                logging.error(f"Failed to generate JWT token: {e}")
+                raise Exception(f"Authentication error: {e}")
 
         try:
             response = self.client.request(
@@ -271,6 +296,13 @@ class HTTPSearchEngine(BasicSearchEngine):
         # Make request
         result = self._make_request("POST", "/api/v1/search", json=payload)
 
+        # Extract real timing from backend response
+        took_ms = result.get("took_ms", 0)
+
+        # Log real search timing from backend
+        if took_ms > 0:
+            logging.debug(f"Search completed in {took_ms}ms (backend timing)")
+
         # Transform response to match expected format
         # Handle None values from API (normalize nulls to empty lists/zeros)
         return {
@@ -279,6 +311,7 @@ class HTTPSearchEngine(BasicSearchEngine):
             "totalPages": result.get("total_pages") or 0,
             "page": result.get("page") or 1,
             "hitsPerPage": result.get("hits_per_page") or 10,
+            "took_ms": took_ms,  # Include real timing from backend
         }
 
     def ping(self) -> Dict[str, Any]:
@@ -384,9 +417,32 @@ def SearchEngine(*args, **kwargs) -> HTTPSearchEngine:
     timeout = config.get_int("search_engine.http.timeout", 30)
     max_retries = config.get_int("search_engine.http.max_retries", 3)
 
+    # Initialize JWT auth if configured
+    jwt_auth = None
+    use_jwt = config.get_bool("auth.use_jwt", False)
+    if use_jwt:
+        try:
+            issuer = config.get("auth.issuer", "bot")
+            audience = config.get("auth.audience", "internal")
+            private_key_path = config.get("auth.private_key_path")
+            public_key_path = config.get("auth.public_key_path")
+
+            if private_key_path and public_key_path:
+                jwt_auth = JWTAuth(
+                    issuer=issuer,
+                    audience=audience,
+                    private_key_path=private_key_path,
+                    public_key_path=public_key_path,
+                )
+                logging.info("JWT authentication enabled for HTTP search engine")
+        except Exception as e:
+            logging.error(f"Failed to initialize JWT auth: {e}")
+            logging.warning("Falling back to API key authentication")
+
     return HTTPSearchEngine(
         base_url=base_url,
         api_key=api_key,
         timeout=timeout,
-        max_retries=max_retries
+        max_retries=max_retries,
+        jwt_auth=jwt_auth,
     )

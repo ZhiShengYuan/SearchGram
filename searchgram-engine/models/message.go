@@ -47,6 +47,7 @@ type SearchResponse struct {
 	TotalPages  int       `json:"total_pages"`   // Total pages
 	Page        int       `json:"page"`          // Current page
 	HitsPerPage int       `json:"hits_per_page"` // Results per page
+	TookMs      int64     `json:"took_ms"`       // Server-side timing in milliseconds
 }
 
 // UpsertResponse represents the result of an upsert operation

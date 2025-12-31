@@ -3,7 +3,9 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
@@ -13,13 +15,15 @@ import (
 
 // APIHandler handles all API endpoints
 type APIHandler struct {
-	engine engines.SearchEngine
+	engine    engines.SearchEngine
+	startTime time.Time
 }
 
 // NewAPIHandler creates a new API handler
-func NewAPIHandler(engine engines.SearchEngine) *APIHandler {
+func NewAPIHandler(engine engines.SearchEngine, startTime time.Time) *APIHandler {
 	return &APIHandler{
-		engine: engine,
+		engine:    engine,
+		startTime: startTime,
 	}
 }
 
@@ -118,6 +122,9 @@ func (h *APIHandler) UpsertBatch(c *gin.Context) {
 // Search handles search queries
 // POST /api/v1/search
 func (h *APIHandler) Search(c *gin.Context) {
+	// Start timing
+	startTime := time.Now()
+
 	var req models.SearchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.WithError(err).Warn("Invalid search request")
@@ -148,6 +155,12 @@ func (h *APIHandler) Search(c *gin.Context) {
 		})
 		return
 	}
+
+	// Calculate elapsed time in milliseconds
+	tookMs := time.Since(startTime).Milliseconds()
+
+	// Add timing to response
+	result.TookMs = tookMs
 
 	c.JSON(http.StatusOK, result)
 }
@@ -292,4 +305,33 @@ func (h *APIHandler) Dedup(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// Status handles health/status checks (new standardized endpoint)
+// GET /api/v1/status
+func (h *APIHandler) Status(c *gin.Context) {
+	// Get total documents
+	result, err := h.engine.Ping()
+	totalDocs := int64(0)
+	if err == nil {
+		totalDocs = result.TotalDocuments
+	}
+
+	// Calculate uptime
+	uptimeSeconds := int64(time.Since(h.startTime).Seconds())
+
+	// Get hostname
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"service":             "search",
+		"status":              "ok",
+		"hostname":            hostname,
+		"uptime_seconds":      uptimeSeconds,
+		"message_index_total": totalDocs,
+		"timestamp":           time.Now().UTC().Format(time.RFC3339),
+	})
 }

@@ -14,12 +14,16 @@ import (
 	"github.com/zhishengyuan/searchgram-engine/config"
 	"github.com/zhishengyuan/searchgram-engine/engines"
 	"github.com/zhishengyuan/searchgram-engine/handlers"
+	jwtpkg "github.com/zhishengyuan/searchgram-engine/jwt"
 	"github.com/zhishengyuan/searchgram-engine/middleware"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
 
 func main() {
+	// Track start time
+	startTime := time.Now()
+
 	// Load configuration
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
@@ -29,6 +33,22 @@ func main() {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to load configuration")
+	}
+
+	// Initialize JWT auth if enabled
+	var jwtAuth *jwtpkg.JWTAuth
+	if cfg.Auth.UseJWT {
+		jwtConfig := jwtpkg.Config{
+			Issuer:         cfg.Auth.Issuer,
+			Audience:       cfg.Auth.Audience,
+			PublicKeyPath:  cfg.Auth.PublicKeyPath,
+			PrivateKeyPath: cfg.Auth.PrivateKeyPath,
+			TokenTTL:       cfg.Auth.TokenTTL,
+		}
+		jwtAuth, err = jwtpkg.NewJWTAuth(jwtConfig)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to initialize JWT auth")
+		}
 	}
 
 	// Initialize search engine
@@ -52,7 +72,7 @@ func main() {
 	defer engine.Close()
 
 	// Create API handler
-	apiHandler := handlers.NewAPIHandler(engine)
+	apiHandler := handlers.NewAPIHandler(engine, startTime)
 
 	// Setup Gin router
 	if cfg.Logging.Level != "debug" {
@@ -65,7 +85,18 @@ func main() {
 	router.Use(middleware.Recovery())
 	router.Use(middleware.CORS())
 	router.Use(middleware.RequestLogger())
-	router.Use(middleware.APIKeyAuth(cfg.Auth.Enabled, cfg.Auth.APIKey))
+
+	// Choose auth middleware
+	if cfg.Auth.UseJWT && jwtAuth != nil {
+		// Use JWT auth for all API routes
+		allowedIssuers := []string{"bot", "userbot", "search"}
+		router.Use(jwtAuth.Middleware(allowedIssuers))
+	} else if cfg.Auth.Enabled {
+		// Fall back to legacy API key auth
+		router.Use(middleware.APIKeyAuth(cfg.Auth.Enabled, cfg.Auth.APIKey))
+	} else {
+		log.Warn("⚠️  Authentication is DISABLED - this is not recommended for production")
+	}
 
 	// API routes
 	v1 := router.Group("/api/v1")
@@ -84,6 +115,7 @@ func main() {
 		// Health and stats
 		v1.GET("/ping", apiHandler.Ping)
 		v1.GET("/stats", apiHandler.Stats)
+		v1.GET("/status", apiHandler.Status)
 	}
 
 	// Root endpoint
