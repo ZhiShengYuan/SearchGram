@@ -25,8 +25,13 @@
     "use_jwt": true,
     "issuer": "bot",
     "audience": "internal",
+    "_key_format_comment": "Keys can be file paths OR inline (single-line string with \\n OR JSON array)",
     "public_key_path": "keys/public.key",
     "private_key_path": "keys/private.key",
+    "public_key_inline": null,
+    "private_key_inline": null,
+    "_inline_example_single_line": "-----BEGIN PUBLIC KEY-----\\nMCowBQYD...\\n-----END PUBLIC KEY-----",
+    "_inline_example_json_array": ["-----BEGIN PUBLIC KEY-----", "MCowBQYDK2VwAyEA...", "-----END PUBLIC KEY-----"],
     "token_ttl": 300
   },
   "http": {

@@ -278,6 +278,8 @@ AUTH_ISSUER = _config_loader.get("auth.issuer", "bot")
 AUTH_AUDIENCE = _config_loader.get("auth.audience", "internal")
 AUTH_PUBLIC_KEY_PATH = _config_loader.get("auth.public_key_path", "keys/public.key")
 AUTH_PRIVATE_KEY_PATH = _config_loader.get("auth.private_key_path", "keys/private.key")
+AUTH_PUBLIC_KEY_INLINE = _config_loader.get("auth.public_key_inline")
+AUTH_PRIVATE_KEY_INLINE = _config_loader.get("auth.private_key_inline")
 AUTH_TOKEN_TTL = _config_loader.get_int("auth.token_ttl", 300)
 
 # HTTP server settings

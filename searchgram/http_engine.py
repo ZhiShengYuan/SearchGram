@@ -424,15 +424,21 @@ def SearchEngine(*args, **kwargs) -> HTTPSearchEngine:
         try:
             issuer = config.get("auth.issuer", "bot")
             audience = config.get("auth.audience", "internal")
+
+            # Support both file paths and inline keys
             private_key_path = config.get("auth.private_key_path")
             public_key_path = config.get("auth.public_key_path")
+            private_key_inline = config.get("auth.private_key_inline")
+            public_key_inline = config.get("auth.public_key_inline")
 
-            if private_key_path and public_key_path:
+            if (private_key_path or private_key_inline) and (public_key_path or public_key_inline):
                 jwt_auth = JWTAuth(
                     issuer=issuer,
                     audience=audience,
                     private_key_path=private_key_path,
                     public_key_path=public_key_path,
+                    private_key_inline=private_key_inline,
+                    public_key_inline=public_key_inline,
                 )
                 logging.info("JWT authentication enabled for HTTP search engine")
         except Exception as e:

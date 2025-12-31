@@ -29,6 +29,8 @@ class JWTAuth:
         audience: str = "internal",
         private_key_path: Optional[str] = None,
         public_key_path: Optional[str] = None,
+        private_key_inline: Optional[str] = None,
+        public_key_inline: Optional[str] = None,
         token_ttl: int = 300,  # 5 minutes default
     ):
         """
@@ -39,6 +41,8 @@ class JWTAuth:
             audience: Target audience (default: "internal")
             private_key_path: Path to Ed25519 private key (PEM format)
             public_key_path: Path to Ed25519 public key (PEM format)
+            private_key_inline: Inline private key (PEM as single-line string or JSON array)
+            public_key_inline: Inline public key (PEM as single-line string or JSON array)
             token_ttl: Token TTL in seconds (default: 300)
         """
         self.issuer = issuer
@@ -50,10 +54,16 @@ class JWTAuth:
         self.private_key = None
         self.public_key = None
 
-        if private_key_path:
+        # Private key: inline takes precedence over path
+        if private_key_inline:
+            self.private_key = self._load_private_key_inline(private_key_inline)
+        elif private_key_path:
             self.private_key = self._load_private_key(private_key_path)
 
-        if public_key_path:
+        # Public key: inline takes precedence over path
+        if public_key_inline:
+            self.public_key = self._load_public_key_inline(public_key_inline)
+        elif public_key_path:
             self.public_key = self._load_public_key(public_key_path)
 
         logging.info(
@@ -92,6 +102,86 @@ class JWTAuth:
         except Exception as e:
             logging.error(f"Failed to load public key from {path}: {e}")
             raise
+
+    def _load_private_key_inline(self, key_data: str) -> ed25519.Ed25519PrivateKey:
+        """
+        Load Ed25519 private key from inline string.
+
+        Args:
+            key_data: PEM key as single-line string or JSON array
+
+        Returns:
+            Ed25519 private key
+        """
+        try:
+            # Parse key data (handle JSON array or single-line string)
+            pem_data = self._parse_inline_key(key_data)
+
+            # Load private key
+            private_key = serialization.load_pem_private_key(
+                pem_data,
+                password=None,
+            )
+            if not isinstance(private_key, ed25519.Ed25519PrivateKey):
+                raise ValueError("Key is not an Ed25519 private key")
+            logging.info("Loaded Ed25519 private key from inline config")
+            return private_key
+        except Exception as e:
+            logging.error(f"Failed to load inline private key: {e}")
+            raise
+
+    def _load_public_key_inline(self, key_data: str) -> ed25519.Ed25519PublicKey:
+        """
+        Load Ed25519 public key from inline string.
+
+        Args:
+            key_data: PEM key as single-line string or JSON array
+
+        Returns:
+            Ed25519 public key
+        """
+        try:
+            # Parse key data (handle JSON array or single-line string)
+            pem_data = self._parse_inline_key(key_data)
+
+            # Load public key
+            public_key = serialization.load_pem_public_key(pem_data)
+            if not isinstance(public_key, ed25519.Ed25519PublicKey):
+                raise ValueError("Key is not an Ed25519 public key")
+            logging.info("Loaded Ed25519 public key from inline config")
+            return public_key
+        except Exception as e:
+            logging.error(f"Failed to load inline public key: {e}")
+            raise
+
+    def _parse_inline_key(self, key_data: str) -> bytes:
+        """
+        Parse inline key data from config.
+
+        Supports two formats:
+        1. Single-line PEM: "-----BEGIN PRIVATE KEY-----\\nMIGH...\\n-----END PRIVATE KEY-----"
+        2. JSON array: ["-----BEGIN PRIVATE KEY-----", "MIGHAgE...", "-----END PRIVATE KEY-----"]
+
+        Args:
+            key_data: Key data as string or JSON array
+
+        Returns:
+            PEM data as bytes
+        """
+        # Try to parse as JSON array first
+        try:
+            lines = json.loads(key_data)
+            if isinstance(lines, list):
+                # Join array lines with newlines
+                pem_str = "\n".join(lines)
+                return pem_str.encode('utf-8')
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Treat as single-line string with \n escape sequences
+        # Replace literal \n with actual newlines
+        pem_str = key_data.replace('\\n', '\n')
+        return pem_str.encode('utf-8')
 
     def generate_token(
         self,
