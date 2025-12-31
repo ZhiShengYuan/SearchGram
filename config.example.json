@@ -1,4 +1,5 @@
 {
+  "_comment": "SearchGram Configuration File - See CONFIG_REFERENCE.md for detailed documentation of all fields",
   "telegram": {
     "app_id": 123456,
     "app_hash": "your_app_hash_here",
@@ -8,6 +9,7 @@
     "ipv6": false
   },
   "services": {
+    "_comment": "Inter-service communication endpoints (RESTful HTTP APIs)",
     "bot": {
       "base_url": "http://127.0.0.1:8081"
     },
@@ -19,6 +21,7 @@
     }
   },
   "auth": {
+    "_comment": "JWT authentication for inter-service communication (Ed25519)",
     "use_jwt": true,
     "issuer": "bot",
     "audience": "internal",
@@ -27,6 +30,7 @@
     "token_ttl": 300
   },
   "http": {
+    "_comment": "HTTP server settings for bot/userbot services",
     "listen": "127.0.0.1",
     "bot_port": 8081,
     "userbot_port": 8082,
@@ -35,32 +39,54 @@
     "cleanup_interval_hours": 24
   },
   "search_engine": {
+    "_comment": "Only 'http' engine is supported (legacy engines removed)",
     "engine": "http",
     "batch": {
+      "_comment": "Batch insert settings for improved performance",
       "enabled": true,
       "size": 100,
       "flush_interval": 1.0
     },
     "http": {
       "base_url": "http://127.0.0.1:8080",
+      "_comment_api_key": "Legacy API key auth (deprecated, use JWT instead)",
       "api_key": null,
       "timeout": 30,
       "max_retries": 3
     }
   },
   "bot": {
+    "_mode_comment": "Mode can be a single string ('private', 'group', 'public') or array (['private', 'group'])",
     "mode": "private",
+    "_mode_examples": {
+      "private_only": "private",
+      "group_only": "group",
+      "multi_mode": ["private", "group"],
+      "public": "public"
+    },
     "allowed_groups": [],
+    "_allowed_groups_example": [-1001234567890, -1009876543210],
+    "_allowed_groups_comment": "All groups that are indexed and searchable (defines the complete set of groups)",
     "allowed_users": [],
+    "_allowed_users_example": [123456789, 987654321],
+    "_allowed_users_comment": "Users who can use the bot (must also be configured in user_group_permissions for group access)",
     "admins": [],
-    "user_group_permissions": {}
+    "_admins_example": [111111111, 222222222],
+    "_admins_comment": "Admin users who can search ALL indexed groups (from allowed_groups). Admins are like owner but without admin command access.",
+    "user_group_permissions": {},
+    "_user_group_permissions_example": {
+      "123456789": [-1001234567890],
+      "987654321": [-1009876543210, -1001234567890]
+    },
+    "_user_group_permissions_comment": "Per-user group access control. Maps user_id (as string) to array of group_ids they can search. Users not listed or with empty array can't search any groups. Owner and admins bypass this."
   },
   "privacy": {
     "storage_file": "privacy_data.json"
   },
   "database": {
     "enabled": true,
-    "path": "searchgram_logs.db"
+    "path": "searchgram_logs.db",
+    "_comment": "SQLite database for query logs and admin settings. Disable if you don't want query logging."
   },
   "sync": {
     "enabled": true,
@@ -70,7 +96,9 @@
     "max_retries": 3,
     "resume_on_restart": true,
     "delay_between_batches": 1.0,
+    "_delay_comment": "Delay in seconds between processing batches to avoid Telegram FloodWait rate limits. Recommended: 0.5-2.0 seconds",
     "clear_completed": false,
+    "_clear_completed_comment": "If false (recommended), keeps completed chats in checkpoint to prevent re-sync on restart. If true, removes them after sync completes.",
     "chats": []
   }
 }
