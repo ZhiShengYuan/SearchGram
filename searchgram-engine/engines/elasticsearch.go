@@ -835,9 +835,12 @@ func (e *ElasticsearchEngine) CleanCommands() (*models.CleanCommandsResponse, er
 
 	log.Info("Starting command cleanup: removing messages starting with '/'")
 
+	// Use wildcard query to match messages starting with '/' (case-insensitive)
+	// Since text.exact uses lowercase analyzer, we search for '/*' pattern
+	wildcardQuery := elastic.NewWildcardQuery("text.exact", "/*")
+
 	// First, count how many commands exist
-	prefixQuery := elastic.NewPrefixQuery("text.keyword", "/")
-	countResult, err := e.client.Count(e.index).Query(prefixQuery).Do(ctx)
+	countResult, err := e.client.Count(e.index).Query(wildcardQuery).Do(ctx)
 	if err != nil {
 		log.WithError(err).Error("Failed to count command messages")
 		return nil, fmt.Errorf("failed to count command messages: %w", err)
@@ -856,7 +859,7 @@ func (e *ElasticsearchEngine) CleanCommands() (*models.CleanCommandsResponse, er
 
 	// Delete all messages starting with '/'
 	deleteResult, err := e.client.DeleteByQuery(e.index).
-		Query(prefixQuery).
+		Query(wildcardQuery).
 		Refresh("true").
 		Do(ctx)
 	if err != nil {
