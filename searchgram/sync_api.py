@@ -56,21 +56,58 @@ def require_jwt_auth(allowed_issuers=None):
     Args:
         allowed_issuers: List of allowed issuer values (e.g., ["bot"])
     """
+    from functools import wraps
+
     def decorator(f):
+        @wraps(f)
         def wrapper(*args, **kwargs):
             # If JWT auth is not configured, allow request (backward compatibility)
             if not _jwt_auth:
                 logging.debug(f"JWT auth not configured, allowing request to {request.path}")
                 return f(*args, **kwargs)
 
-            # Apply JWT authentication
-            from functools import wraps
-            @wraps(f)
-            @_jwt_auth.flask_middleware(allowed_issuers=allowed_issuers)
-            def authenticated_handler(*args, **kwargs):
-                return f(*args, **kwargs)
+            # Apply JWT authentication manually
+            auth_header = request.headers.get('Authorization')
 
-            return authenticated_handler(*args, **kwargs)
+            if not auth_header:
+                logging.warning(
+                    f"Missing Authorization header: {request.method} {request.path} from {request.remote_addr}"
+                )
+                return jsonify({
+                    "error": "Unauthorized",
+                    "message": "Missing or invalid Authorization header"
+                }), 401
+
+            # Check Bearer prefix
+            if not auth_header.startswith('Bearer '):
+                logging.warning(
+                    f"Invalid Authorization header format: {request.method} {request.path} from {request.remote_addr}"
+                )
+                return jsonify({
+                    "error": "Unauthorized",
+                    "message": "Invalid Authorization header format"
+                }), 401
+
+            # Extract token
+            token = auth_header[7:]  # Remove "Bearer " prefix
+
+            # Verify token
+            try:
+                import jwt as jwt_module
+                claims = _jwt_auth.verify_token(token, allowed_issuers)
+                # Attach claims to Flask request context
+                request.jwt_claims = claims
+                request.jwt_issuer = claims.get("iss")
+            except jwt_module.InvalidTokenError as e:
+                logging.warning(
+                    f"JWT verification failed: {request.method} {request.path} from {request.remote_addr}: {str(e)}"
+                )
+                return jsonify({
+                    "error": "Unauthorized",
+                    "message": f"Invalid token: {str(e)}"
+                }), 401
+
+            return f(*args, **kwargs)
         return wrapper
     return decorator
 
