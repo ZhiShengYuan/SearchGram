@@ -59,6 +59,33 @@
       "max_retries": 3
     }
   },
+  "search_service": {
+    "_comment": "Go search service (searchgram-engine) configuration",
+    "server": {
+      "host": "127.0.0.1",
+      "port": 8080,
+      "read_timeout": "30s",
+      "write_timeout": "30s"
+    },
+    "elasticsearch": {
+      "host": "http://localhost:9200",
+      "username": "elastic",
+      "password": "changeme",
+      "index": "telegram",
+      "shards": 3,
+      "replicas": 1
+    },
+    "logging": {
+      "level": "info",
+      "format": "json",
+      "_level_options": ["debug", "info", "warn", "error"],
+      "_format_options": ["json", "text"]
+    },
+    "cache": {
+      "enabled": false,
+      "ttl": "300s"
+    }
+  },
   "bot": {
     "_mode_comment": "Mode can be a single string ('private', 'group', 'public') or array (['private', 'group'])",
     "mode": "private",

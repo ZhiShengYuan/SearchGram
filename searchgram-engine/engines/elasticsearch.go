@@ -172,6 +172,29 @@ func (e *ElasticsearchEngine) initializeIndex(shards, replicas int) error {
 				"timestamp": map[string]interface{}{
 					"type": "long",
 				},
+				"entities": map[string]interface{}{
+					"type": "nested",
+					"properties": map[string]interface{}{
+						"type": map[string]interface{}{
+							"type": "keyword",
+						},
+						"offset": map[string]interface{}{
+							"type": "integer",
+						},
+						"length": map[string]interface{}{
+							"type": "integer",
+						},
+						"user_id": map[string]interface{}{
+							"type": "long",
+						},
+					},
+				},
+				"is_deleted": map[string]interface{}{
+					"type": "boolean",
+				},
+				"deleted_at": map[string]interface{}{
+					"type": "long",
+				},
 			},
 		},
 	}
@@ -309,6 +332,11 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 		}
 	}
 
+	// Exclude soft-deleted messages by default (unless include_deleted is true)
+	if !req.IncludeDeleted {
+		boolQuery.MustNot(elastic.NewTermQuery("is_deleted", true))
+	}
+
 	// Pagination
 	if req.Page < 1 {
 		req.Page = 1
@@ -355,40 +383,58 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 	}, nil
 }
 
-// Delete removes messages by chat ID
+// Delete soft-deletes messages by chat ID
 func (e *ElasticsearchEngine) Delete(chatID int64) (int64, error) {
 	ctx := context.Background()
 
 	query := elastic.NewTermQuery("chat.id", chatID)
 
-	result, err := e.client.DeleteByQuery().
-		Index(e.index).
+	// Soft-delete: mark is_deleted=true and set deleted_at timestamp
+	script := elastic.NewScript("ctx._source.is_deleted = true; ctx._source.deleted_at = params.now").
+		Param("now", time.Now().Unix())
+
+	result, err := e.client.UpdateByQuery(e.index).
 		Query(query).
+		Script(script).
 		Do(ctx)
 
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete by chat ID: %w", err)
+		return 0, fmt.Errorf("failed to soft-delete by chat ID: %w", err)
 	}
 
-	return result.Deleted, nil
+	log.WithFields(log.Fields{
+		"chat_id": chatID,
+		"count":   result.Updated,
+	}).Info("Soft-deleted messages by chat ID")
+
+	return result.Updated, nil
 }
 
-// DeleteUser removes all messages from a specific user
+// DeleteUser soft-deletes all messages from a specific user
 func (e *ElasticsearchEngine) DeleteUser(userID int64) (int64, error) {
 	ctx := context.Background()
 
 	query := elastic.NewTermQuery("from_user.id", userID)
 
-	result, err := e.client.DeleteByQuery().
-		Index(e.index).
+	// Soft-delete: mark is_deleted=true and set deleted_at timestamp
+	script := elastic.NewScript("ctx._source.is_deleted = true; ctx._source.deleted_at = params.now").
+		Param("now", time.Now().Unix())
+
+	result, err := e.client.UpdateByQuery(e.index).
 		Query(query).
+		Script(script).
 		Do(ctx)
 
 	if err != nil {
-		return 0, fmt.Errorf("failed to delete by user ID: %w", err)
+		return 0, fmt.Errorf("failed to soft-delete by user ID: %w", err)
 	}
 
-	return result.Deleted, nil
+	log.WithFields(log.Fields{
+		"user_id": userID,
+		"count":   result.Updated,
+	}).Info("Soft-deleted messages by user ID")
+
+	return result.Updated, nil
 }
 
 // Clear removes all documents from the index
@@ -622,6 +668,128 @@ func (e *ElasticsearchEngine) Dedup() (*models.DedupResponse, error) {
 		DuplicatesRemoved: duplicatesRemoved,
 		Message:           message,
 	}, nil
+}
+
+// SoftDeleteMessage marks a single message as deleted
+func (e *ElasticsearchEngine) SoftDeleteMessage(chatID int64, messageID int64) error {
+	ctx := context.Background()
+
+	// Construct composite document ID
+	documentID := fmt.Sprintf("%d-%d", chatID, messageID)
+
+	// Soft-delete: mark is_deleted=true and set deleted_at timestamp
+	script := elastic.NewScript("ctx._source.is_deleted = true; ctx._source.deleted_at = params.now").
+		Param("now", time.Now().Unix())
+
+	_, err := e.client.Update().
+		Index(e.index).
+		Id(documentID).
+		Script(script).
+		Do(ctx)
+
+	if err != nil {
+		return fmt.Errorf("failed to soft-delete message %s: %w", documentID, err)
+	}
+
+	log.WithFields(log.Fields{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"doc_id":     documentID,
+	}).Info("Soft-deleted message")
+
+	return nil
+}
+
+// GetUserStats retrieves activity statistics for a user in a group
+func (e *ElasticsearchEngine) GetUserStats(req *models.UserStatsRequest) (*models.UserStatsResponse, error) {
+	ctx := context.Background()
+
+	// Build base query: filter by group and time range
+	baseQuery := elastic.NewBoolQuery().
+		Filter(elastic.NewTermQuery("chat.id", req.GroupID)).
+		Filter(elastic.NewRangeQuery("timestamp").Gte(req.FromTimestamp).Lte(req.ToTimestamp))
+
+	// Exclude deleted messages unless explicitly included
+	if !req.IncludeDeleted {
+		baseQuery.MustNot(elastic.NewTermQuery("is_deleted", true))
+	}
+
+	// Query 1: Count messages from the specific user
+	userQuery := elastic.NewBoolQuery().
+		Must(baseQuery).
+		Filter(elastic.NewTermQuery("from_user.id", req.UserID))
+
+	userCount, err := e.client.Count(e.index).Query(userQuery).Do(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count user messages: %w", err)
+	}
+
+	// Query 2: Count total messages in the group
+	groupCount, err := e.client.Count(e.index).Query(baseQuery).Do(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count group messages: %w", err)
+	}
+
+	// Calculate ratio
+	var userRatio float64 = 0.0
+	if groupCount > 0 {
+		userRatio = float64(userCount) / float64(groupCount)
+	}
+
+	response := &models.UserStatsResponse{
+		UserMessageCount:  userCount,
+		GroupMessageTotal: groupCount,
+		UserRatio:         userRatio,
+		MentionsOut:       0,
+		MentionsIn:        0,
+	}
+
+	// Query 3 & 4: Count mentions if requested
+	if req.IncludeMentions {
+		// Mentions out: messages sent by user that contain mentions
+		mentionsOutQuery := elastic.NewBoolQuery().
+			Must(baseQuery).
+			Filter(elastic.NewTermQuery("from_user.id", req.UserID)).
+			Filter(elastic.NewNestedQuery("entities", elastic.NewBoolQuery().Should(
+				elastic.NewTermQuery("entities.type", "mention"),
+				elastic.NewTermQuery("entities.type", "text_mention"),
+			)))
+
+		mentionsOutCount, err := e.client.Count(e.index).Query(mentionsOutQuery).Do(ctx)
+		if err != nil {
+			log.WithError(err).Warn("Failed to count outgoing mentions")
+		} else {
+			response.MentionsOut = mentionsOutCount
+		}
+
+		// Mentions in: messages from others that mention this user (text_mention entities)
+		mentionsInQuery := elastic.NewBoolQuery().
+			Must(baseQuery).
+			MustNot(elastic.NewTermQuery("from_user.id", req.UserID)).
+			Filter(elastic.NewNestedQuery("entities", elastic.NewBoolQuery().
+				Must(elastic.NewTermQuery("entities.type", "text_mention")).
+				Must(elastic.NewTermQuery("entities.user_id", req.UserID)),
+			))
+
+		mentionsInCount, err := e.client.Count(e.index).Query(mentionsInQuery).Do(ctx)
+		if err != nil {
+			log.WithError(err).Warn("Failed to count incoming mentions")
+		} else {
+			response.MentionsIn = mentionsInCount
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"group_id":     req.GroupID,
+		"user_id":      req.UserID,
+		"user_count":   userCount,
+		"group_total":  groupCount,
+		"ratio":        userRatio,
+		"mentions_out": response.MentionsOut,
+		"mentions_in":  response.MentionsIn,
+	}).Info("User stats calculated")
+
+	return response, nil
 }
 
 // Close closes the connection to Elasticsearch

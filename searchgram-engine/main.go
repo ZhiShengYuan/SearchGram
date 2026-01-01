@@ -27,7 +27,14 @@ func main() {
 	// Load configuration
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
-		configPath = "config.yaml"
+		// Try config.json first (unified config), then fall back to config.yaml
+		if _, err := os.Stat("../config.json"); err == nil {
+			configPath = "../config.json"
+		} else if _, err := os.Stat("config.json"); err == nil {
+			configPath = "config.json"
+		} else {
+			configPath = "config.yaml"
+		}
 	}
 
 	cfg, err := config.Load(configPath)
@@ -39,11 +46,13 @@ func main() {
 	var jwtAuth *jwtpkg.JWTAuth
 	if cfg.Auth.UseJWT {
 		jwtConfig := jwtpkg.Config{
-			Issuer:         cfg.Auth.Issuer,
-			Audience:       cfg.Auth.Audience,
-			PublicKeyPath:  cfg.Auth.PublicKeyPath,
-			PrivateKeyPath: cfg.Auth.PrivateKeyPath,
-			TokenTTL:       cfg.Auth.TokenTTL,
+			Issuer:           cfg.Auth.Issuer,
+			Audience:         cfg.Auth.Audience,
+			PublicKeyPath:    cfg.Auth.PublicKeyPath,
+			PrivateKeyPath:   cfg.Auth.PrivateKeyPath,
+			PublicKeyInline:  cfg.Auth.PublicKeyInline,
+			PrivateKeyInline: cfg.Auth.PrivateKeyInline,
+			TokenTTL:         cfg.Auth.TokenTTL,
 		}
 		jwtAuth, err = jwtpkg.NewJWTAuth(jwtConfig)
 		if err != nil {
@@ -105,6 +114,7 @@ func main() {
 		v1.POST("/upsert", apiHandler.Upsert)
 		v1.POST("/upsert/batch", apiHandler.UpsertBatch)
 		v1.POST("/search", apiHandler.Search)
+		v1.POST("/messages/soft-delete", apiHandler.SoftDeleteMessage)
 		v1.DELETE("/messages", apiHandler.DeleteMessages)
 		v1.DELETE("/users/:user_id", apiHandler.DeleteUser)
 		v1.DELETE("/clear", apiHandler.Clear)
@@ -116,6 +126,7 @@ func main() {
 		v1.GET("/ping", apiHandler.Ping)
 		v1.GET("/stats", apiHandler.Stats)
 		v1.GET("/status", apiHandler.Status)
+		v1.POST("/stats/user", apiHandler.UserStats)
 	}
 
 	// Root endpoint

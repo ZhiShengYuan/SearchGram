@@ -335,3 +335,91 @@ func (h *APIHandler) Status(c *gin.Context) {
 		"timestamp":           time.Now().UTC().Format(time.RFC3339),
 	})
 }
+
+// SoftDeleteMessage handles soft-deleting a single message
+// POST /api/v1/messages/soft-delete
+func (h *APIHandler) SoftDeleteMessage(c *gin.Context) {
+	var req struct {
+		ChatID    int64 `json:"chat_id" binding:"required"`
+		MessageID int64 `json:"message_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).Warn("Invalid soft-delete request")
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	if err := h.engine.SoftDeleteMessage(req.ChatID, req.MessageID); err != nil {
+		log.WithError(err).Error("Failed to soft-delete message")
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: "Failed to soft-delete message",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("Message %d-%d marked as deleted", req.ChatID, req.MessageID),
+	})
+}
+
+// UserStats handles user activity statistics requests
+// POST /api/v1/stats/user
+func (h *APIHandler) UserStats(c *gin.Context) {
+	var req models.UserStatsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.WithError(err).Warn("Invalid user stats request")
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// Validate required fields
+	if req.GroupID == 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: "group_id is required",
+		})
+		return
+	}
+	if req.UserID == 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: "user_id is required",
+		})
+		return
+	}
+	if req.FromTimestamp == 0 || req.ToTimestamp == 0 {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: "from_timestamp and to_timestamp are required",
+		})
+		return
+	}
+	if req.FromTimestamp > req.ToTimestamp {
+		c.JSON(http.StatusBadRequest, models.ErrorResponse{
+			Error:   "Bad Request",
+			Message: "from_timestamp must be less than to_timestamp",
+		})
+		return
+	}
+
+	result, err := h.engine.GetUserStats(&req)
+	if err != nil {
+		log.WithError(err).Error("Failed to get user stats")
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: "Failed to retrieve user statistics",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}

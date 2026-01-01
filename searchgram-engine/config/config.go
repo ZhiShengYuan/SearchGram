@@ -11,62 +11,64 @@ import (
 
 // Config holds all configuration for the search service
 type Config struct {
-	Server        ServerConfig        `mapstructure:"server"`
-	SearchEngine  SearchEngineConfig  `mapstructure:"search_engine"`
-	Elasticsearch ElasticsearchConfig `mapstructure:"elasticsearch"`
-	Auth          AuthConfig          `mapstructure:"auth"`
-	Logging       LoggingConfig       `mapstructure:"logging"`
-	Cache         CacheConfig         `mapstructure:"cache"`
+	Server        ServerConfig        `mapstructure:"server" json:"server"`
+	SearchEngine  SearchEngineConfig  `mapstructure:"search_engine" json:"search_engine"`
+	Elasticsearch ElasticsearchConfig `mapstructure:"elasticsearch" json:"elasticsearch"`
+	Auth          AuthConfig          `mapstructure:"auth" json:"auth"`
+	Logging       LoggingConfig       `mapstructure:"logging" json:"logging"`
+	Cache         CacheConfig         `mapstructure:"cache" json:"cache"`
 }
 
 // ServerConfig holds HTTP server configuration
 type ServerConfig struct {
-	Host         string        `mapstructure:"host"`
-	Port         int           `mapstructure:"port"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+	Host         string        `mapstructure:"host" json:"host"`
+	Port         int           `mapstructure:"port" json:"port"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout" json:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout" json:"write_timeout"`
 }
 
 // SearchEngineConfig holds search engine type configuration
 type SearchEngineConfig struct {
-	Type string `mapstructure:"type"` // elasticsearch, meilisearch, mongodb, zinc
+	Type string `mapstructure:"type" json:"type"` // elasticsearch, meilisearch, mongodb, zinc
 }
 
 // ElasticsearchConfig holds Elasticsearch-specific configuration
 type ElasticsearchConfig struct {
-	Host     string `mapstructure:"host"`
-	Username string `mapstructure:"username"`
-	Password string `mapstructure:"password"`
-	Index    string `mapstructure:"index"`
-	Shards   int    `mapstructure:"shards"`
-	Replicas int    `mapstructure:"replicas"`
+	Host     string `mapstructure:"host" json:"host"`
+	Username string `mapstructure:"username" json:"username"`
+	Password string `mapstructure:"password" json:"password"`
+	Index    string `mapstructure:"index" json:"index"`
+	Shards   int    `mapstructure:"shards" json:"shards"`
+	Replicas int    `mapstructure:"replicas" json:"replicas"`
 }
 
 // AuthConfig holds authentication configuration
 type AuthConfig struct {
 	// Legacy API key auth (deprecated)
-	Enabled bool   `mapstructure:"enabled"`
-	APIKey  string `mapstructure:"api_key"`
+	Enabled bool   `mapstructure:"enabled" json:"enabled"`
+	APIKey  string `mapstructure:"api_key" json:"api_key"`
 
 	// JWT auth (recommended)
-	UseJWT         bool   `mapstructure:"use_jwt"`
-	Issuer         string `mapstructure:"issuer"`
-	Audience       string `mapstructure:"audience"`
-	PublicKeyPath  string `mapstructure:"public_key_path"`
-	PrivateKeyPath string `mapstructure:"private_key_path"`
-	TokenTTL       int    `mapstructure:"token_ttl"` // seconds
+	UseJWT           bool        `mapstructure:"use_jwt" json:"use_jwt"`
+	Issuer           string      `mapstructure:"issuer" json:"issuer"`
+	Audience         string      `mapstructure:"audience" json:"audience"`
+	PublicKeyPath    string      `mapstructure:"public_key_path" json:"public_key_path"`
+	PrivateKeyPath   string      `mapstructure:"private_key_path" json:"private_key_path"`
+	PublicKeyInline  interface{} `mapstructure:"public_key_inline" json:"public_key_inline"`
+	PrivateKeyInline interface{} `mapstructure:"private_key_inline" json:"private_key_inline"`
+	TokenTTL         int         `mapstructure:"token_ttl" json:"token_ttl"` // seconds
 }
 
 // LoggingConfig holds logging configuration
 type LoggingConfig struct {
-	Level  string `mapstructure:"level"`
-	Format string `mapstructure:"format"` // json or text
+	Level  string `mapstructure:"level" json:"level"`
+	Format string `mapstructure:"format" json:"format"` // json or text
 }
 
 // CacheConfig holds caching configuration
 type CacheConfig struct {
-	Enabled bool          `mapstructure:"enabled"`
-	TTL     time.Duration `mapstructure:"ttl"`
+	Enabled bool          `mapstructure:"enabled" json:"enabled"`
+	TTL     time.Duration `mapstructure:"ttl" json:"ttl"`
 }
 
 // Load loads configuration from file and environment
@@ -79,8 +81,18 @@ func Load(configPath string) (*Config, error) {
 	// Load from config file if provided
 	if configPath != "" {
 		v.SetConfigFile(configPath)
+
+		// Detect file type based on extension
+		if strings.HasSuffix(configPath, ".json") {
+			v.SetConfigType("json")
+		} else if strings.HasSuffix(configPath, ".yaml") || strings.HasSuffix(configPath, ".yml") {
+			v.SetConfigType("yaml")
+		}
+
 		if err := v.ReadInConfig(); err != nil {
 			log.WithError(err).Warn("Failed to read config file, using defaults")
+		} else {
+			log.WithField("file", configPath).Info("Loaded configuration file")
 		}
 	}
 
@@ -89,10 +101,37 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// Unmarshal into config struct
+	// For unified config.json, read from search_service section
 	var cfg Config
-	if err := v.Unmarshal(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	if v.IsSet("search_service") {
+		// Reading from unified config.json format
+		if err := v.UnmarshalKey("search_service", &cfg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal search_service config: %w", err)
+		}
+
+		// Also read auth from top-level auth section for JWT keys
+		if v.IsSet("auth") {
+			var authCfg AuthConfig
+			if err := v.UnmarshalKey("auth", &authCfg); err == nil {
+				// Use JWT settings from top-level auth section
+				cfg.Auth.UseJWT = authCfg.UseJWT
+				cfg.Auth.Issuer = authCfg.Issuer
+				cfg.Auth.Audience = authCfg.Audience
+				cfg.Auth.PublicKeyPath = authCfg.PublicKeyPath
+				cfg.Auth.PrivateKeyPath = authCfg.PrivateKeyPath
+				cfg.Auth.PublicKeyInline = authCfg.PublicKeyInline
+				cfg.Auth.PrivateKeyInline = authCfg.PrivateKeyInline
+				cfg.Auth.TokenTTL = authCfg.TokenTTL
+			}
+		}
+
+		// Set search engine type to elasticsearch (only supported type)
+		cfg.SearchEngine.Type = "elasticsearch"
+	} else {
+		// Reading from standalone config.yaml format (legacy)
+		if err := v.Unmarshal(&cfg); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+		}
 	}
 
 	// Validate configuration

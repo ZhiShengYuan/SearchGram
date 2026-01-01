@@ -18,11 +18,13 @@ import (
 
 // Config holds JWT configuration
 type Config struct {
-	Issuer         string
-	Audience       string
-	PublicKeyPath  string
-	PrivateKeyPath string
-	TokenTTL       int // seconds
+	Issuer           string
+	Audience         string
+	PublicKeyPath    string
+	PrivateKeyPath   string
+	PublicKeyInline  interface{} // Can be string or []string
+	PrivateKeyInline interface{} // Can be string or []string
+	TokenTTL         int         // seconds
 }
 
 // JWTAuth handles JWT authentication
@@ -52,23 +54,49 @@ func NewJWTAuth(cfg Config) (*JWTAuth, error) {
 	}
 
 	// Load public key (required for verification)
-	if cfg.PublicKeyPath != "" {
+	if cfg.PublicKeyInline != nil {
+		// Use inline key
+		keyData, err := parseInlineKey(cfg.PublicKeyInline)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse inline public key: %w", err)
+		}
+		publicKey, err := parsePublicKey(keyData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse inline public key: %w", err)
+		}
+		auth.publicKey = publicKey
+		log.Info("Loaded Ed25519 public key from inline config")
+	} else if cfg.PublicKeyPath != "" {
+		// Load from file
 		publicKey, err := loadPublicKey(cfg.PublicKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load public key: %w", err)
 		}
 		auth.publicKey = publicKey
-		log.WithField("path", cfg.PublicKeyPath).Info("Loaded Ed25519 public key")
+		log.WithField("path", cfg.PublicKeyPath).Info("Loaded Ed25519 public key from file")
 	}
 
 	// Load private key (optional, for generating tokens)
-	if cfg.PrivateKeyPath != "" {
+	if cfg.PrivateKeyInline != nil {
+		// Use inline key
+		keyData, err := parseInlineKey(cfg.PrivateKeyInline)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse inline private key: %w", err)
+		}
+		privateKey, err := parsePrivateKey(keyData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse inline private key: %w", err)
+		}
+		auth.privateKey = privateKey
+		log.Info("Loaded Ed25519 private key from inline config")
+	} else if cfg.PrivateKeyPath != "" {
+		// Load from file
 		privateKey, err := loadPrivateKey(cfg.PrivateKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load private key: %w", err)
 		}
 		auth.privateKey = privateKey
-		log.WithField("path", cfg.PrivateKeyPath).Info("Loaded Ed25519 private key")
+		log.WithField("path", cfg.PrivateKeyPath).Info("Loaded Ed25519 private key from file")
 	}
 
 	log.WithFields(log.Fields{
@@ -81,13 +109,33 @@ func NewJWTAuth(cfg Config) (*JWTAuth, error) {
 	return auth, nil
 }
 
-// loadPublicKey loads an Ed25519 public key from PEM file
-func loadPublicKey(path string) (ed25519.PublicKey, error) {
-	keyData, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read public key file: %w", err)
+// parseInlineKey parses inline key from string or string array
+func parseInlineKey(key interface{}) ([]byte, error) {
+	switch v := key.(type) {
+	case string:
+		// Single-line string with \n
+		return []byte(strings.ReplaceAll(v, "\\n", "\n")), nil
+	case []interface{}:
+		// JSON array of lines
+		var lines []string
+		for _, line := range v {
+			if str, ok := line.(string); ok {
+				lines = append(lines, str)
+			} else {
+				return nil, fmt.Errorf("invalid line type in key array")
+			}
+		}
+		return []byte(strings.Join(lines, "\n")), nil
+	case []string:
+		// String array
+		return []byte(strings.Join(v, "\n")), nil
+	default:
+		return nil, fmt.Errorf("invalid inline key type: %T", key)
 	}
+}
 
+// parsePublicKey parses an Ed25519 public key from PEM data
+func parsePublicKey(keyData []byte) (ed25519.PublicKey, error) {
 	block, _ := pem.Decode(keyData)
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode PEM block")
@@ -106,13 +154,18 @@ func loadPublicKey(path string) (ed25519.PublicKey, error) {
 	return edPub, nil
 }
 
-// loadPrivateKey loads an Ed25519 private key from PEM file
-func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
+// loadPublicKey loads an Ed25519 public key from PEM file
+func loadPublicKey(path string) (ed25519.PublicKey, error) {
 	keyData, err := ioutil.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read private key file: %w", err)
+		return nil, fmt.Errorf("failed to read public key file: %w", err)
 	}
 
+	return parsePublicKey(keyData)
+}
+
+// parsePrivateKey parses an Ed25519 private key from PEM data
+func parsePrivateKey(keyData []byte) (ed25519.PrivateKey, error) {
 	block, _ := pem.Decode(keyData)
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode PEM block")
@@ -129,6 +182,16 @@ func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	}
 
 	return edPriv, nil
+}
+
+// loadPrivateKey loads an Ed25519 private key from PEM file
+func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
+	keyData, err := ioutil.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read private key file: %w", err)
+	}
+
+	return parsePrivateKey(keyData)
 }
 
 // GenerateToken generates a JWT token for outbound requests

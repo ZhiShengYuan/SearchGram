@@ -31,6 +31,12 @@ type SearchEngine interface {
 	// Dedup removes duplicate messages (keeps latest by timestamp)
 	Dedup() (*models.DedupResponse, error)
 
+	// GetUserStats retrieves activity statistics for a user in a group
+	GetUserStats(req *models.UserStatsRequest) (*models.UserStatsResponse, error)
+
+	// SoftDeleteMessage marks a single message as deleted
+	SoftDeleteMessage(chatID int64, messageID int64) error
+
 	// Close closes the connection to the search engine
 	Close() error
 }

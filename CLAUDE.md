@@ -37,17 +37,26 @@ The project has a **microservice architecture** with three main components:
 - Search service endpoint: `services.search.base_url` (unified with other service endpoints)
 - Authentication: JWT-based (configured in `auth` section) - **required, no fallback**
 - The Go service handles Elasticsearch connection pooling, credentials, and CJK optimization internally
+- **Go service configuration**: Reads from `search_service` section in unified `config.json`
+  - Elasticsearch settings: `search_service.elasticsearch.*`
+  - Server settings: `search_service.server.*`
+  - Logging: `search_service.logging.*`
+  - Cache: `search_service.cache.*`
 
 The HTTP search engine implements the `BasicSearchEngine` interface from `searchgram/engine.py` with methods: `upsert()`, `search()`, `ping()`, `clear_db()`, `delete_user()`, and `dedup()`.
 
 ## Configuration
 
-SearchGram now supports **JSON-based configuration** with fallback to environment variables. Configuration priority (highest to lowest):
+SearchGram uses a **unified JSON-based configuration** (`config.json`) for all services. Configuration priority (highest to lowest):
 1. Environment variables
 2. `config.json` file
 3. Default values
 
-All configuration is managed by `searchgram/config_loader.py`:
+The unified config file is shared between:
+- **Python services** (bot and client): Loaded via `searchgram/config_loader.py`
+- **Go search service**: Loaded via `searchgram-engine/config/config.go`
+
+All services read from the same `config.json` file, which reduces duplication and ensures consistency.
 
 **Telegram Credentials:**
 - `APP_ID`, `APP_HASH`: Telegram API credentials from https://my.telegram.org/
@@ -96,16 +105,53 @@ All configuration is managed by `searchgram/config_loader.py`:
 - `PROXY`: Optional proxy configuration (dict or JSON string)
 - `IPv6`: Enable IPv6 support
 
+**Go Search Service Settings** (`search_service` section):
+- **Server Configuration**:
+  - `server.host`: Listen address (default: `127.0.0.1`)
+  - `server.port`: Listen port (default: `8080`)
+  - `server.read_timeout`: HTTP read timeout (default: `"30s"`)
+  - `server.write_timeout`: HTTP write timeout (default: `"30s"`)
+- **Elasticsearch Configuration**:
+  - `elasticsearch.host`: Elasticsearch endpoint (default: `http://localhost:9200`)
+  - `elasticsearch.username`: Username for authentication (default: `"elastic"`)
+  - `elasticsearch.password`: Password for authentication
+  - `elasticsearch.index`: Index name (default: `"telegram"`)
+  - `elasticsearch.shards`: Number of shards (default: `3`)
+  - `elasticsearch.replicas`: Number of replicas (default: `1`)
+- **Logging Configuration**:
+  - `logging.level`: Log level - `debug`, `info`, `warn`, `error` (default: `"info"`)
+  - `logging.format`: Log format - `json` or `text` (default: `"json"`)
+- **Cache Configuration** (optional):
+  - `cache.enabled`: Enable caching (default: `false`)
+  - `cache.ttl`: Cache TTL (default: `"300s"`)
+
+**Note**: The Go service automatically reads JWT auth settings from the top-level `auth` section, supporting both file-based keys (`public_key_path`, `private_key_path`) and inline keys (`public_key_inline`, `private_key_inline`).
+
 ## Running the Application
 
 ```bash
-# First-time setup: login to client (creates session files)
+# First-time setup: Create config.json from example
+cp config.example.json config.json
+# Edit config.json with your settings
+
+# Start the Go search service (Terminal 1)
+cd searchgram-engine
+go run main.go
+# Or set custom config path: CONFIG_PATH=/path/to/config.json go run main.go
+
+# First-time setup: login to client (creates session files) (Terminal 2)
 python searchgram/client.py
 
-# Run both processes (requires two terminals):
-python searchgram/client.py  # Terminal 1
-python searchgram/bot.py     # Terminal 2
+# Run the Python services (requires two more terminals):
+python searchgram/client.py  # Terminal 2 (or run in background)
+python searchgram/bot.py     # Terminal 3
 ```
+
+**Configuration Notes**:
+- The Go service automatically detects `config.json` in the parent directory (`../config.json`) or current directory
+- You can override the config path using the `CONFIG_PATH` environment variable
+- For backward compatibility, the Go service still supports standalone `config.yaml` files
+- The Python services use `config.json` by default, with fallback to environment variables
 
 ## Testing
 
@@ -184,10 +230,28 @@ Tests currently cover the argument parser for search query syntax.
 - `/help` - Show comprehensive help with search syntax and privacy info
 - `/{chat_type} [username] keyword` - Type-specific search (PRIVATE, GROUP, CHANNEL, etc.)
 
-**Privacy Commands (NEW):**
+**Privacy Commands:**
 - `/block_me` - Opt-out: Remove yourself from search results
 - `/unblock_me` - Opt-in: Allow your messages in search results
 - `/privacy_status` - Check your current privacy status
+
+**Activity Stats Commands (Group Only):**
+- `/mystats` - Show your activity stats in the last year (default)
+- `/mystats <time_window>` - Custom time window (e.g., `30d`, `90d`, `1y`)
+- `/mystats <time_window> at` - Include mention counts (outgoing and incoming)
+- `/mystats <date_range>` - Custom date range (e.g., `2025-01-01..2025-12-31`)
+
+**Supported Time Windows:**
+- Relative: `7d`, `30d`, `90d`, `365d`, `1y`, `2y`
+- Date range: `YYYY-MM-DD..YYYY-MM-DD` (e.g., `2025-01-01..2025-12-31`)
+
+**Stats Output Includes:**
+- Your message count in the group (time window)
+- Total group messages (time window)
+- Your percentage of group activity
+- Mention counts (if `at` flag is used):
+  - Outgoing: How many times you mentioned others
+  - Incoming: How many times others mentioned you
 
 **Admin Commands (Owner Only):**
 - `/ping` - Comprehensive bot health check: search engine status, total messages, privacy stats, query logs, bot configuration
@@ -348,6 +412,91 @@ CREATE TABLE admin_settings (
     updated_by INTEGER NOT NULL
 );
 ```
+
+## Soft-Delete System
+
+SearchGram uses a **soft-delete** system for message deletion:
+
+**How It Works:**
+- When messages are deleted on Telegram, they are marked as `is_deleted=true` instead of being physically removed
+- Deleted messages include a `deleted_at` timestamp
+- Soft-deleted messages are automatically excluded from search results for regular users
+- Owner can optionally include deleted messages in searches via `include_deleted` parameter
+
+**Benefits:**
+- Preserves historical data for analytics and statistics
+- Allows activity stats to accurately reflect user activity even after messages are deleted
+- Enables owner to audit deleted content if needed
+- No data loss due to accidental deletions
+
+**Implementation Details:**
+- **Client Handler**: `@app.on_deleted_messages()` handler captures deletion events
+- **Backend**: Elasticsearch Update By Query marks messages as deleted
+- **Search Filter**: Automatically excludes deleted messages unless `include_deleted=true`
+- **Stats**: By default, deleted messages are not counted in user stats (configurable)
+
+**Database Schema:**
+- `is_deleted`: Boolean field (indexed)
+- `deleted_at`: Unix timestamp (when message was deleted)
+
+**Note:** The `/delete` and `/delete_user` admin commands also use soft-delete (they no longer physically remove messages).
+
+## Activity Stats System
+
+The **Activity Stats** feature allows users to query their message activity in groups:
+
+**Features:**
+- Count messages sent by a user in a specific time window
+- Calculate percentage of group activity
+- Track mention patterns (optional):
+  - **Outgoing mentions**: User mentioned others
+  - **Incoming mentions**: Others mentioned the user
+- Support for flexible time windows (relative or absolute date ranges)
+
+**API Endpoint:**
+```
+POST /api/v1/stats/user
+```
+
+**Request Payload:**
+```json
+{
+  "group_id": -1001234567890,
+  "user_id": 123456789,
+  "from_timestamp": 1640995200,
+  "to_timestamp": 1672531199,
+  "include_mentions": true,
+  "include_deleted": false
+}
+```
+
+**Response:**
+```json
+{
+  "user_message_count": 1234,
+  "group_message_total": 9950,
+  "user_ratio": 0.124,
+  "mentions_out": 56,
+  "mentions_in": 41
+}
+```
+
+**Mention Tracking:**
+- Entities are extracted from Telegram messages during indexing
+- Stored in nested `entities` field with type, offset, length, user_id
+- Types tracked: `mention` (username), `text_mention` (user link)
+- Outgoing: Messages sent by user containing mentions
+- Incoming: Messages from others with `text_mention` entities referencing the user
+
+**Time Window Parsing:**
+- Relative: `7d`, `30d`, `90d`, `365d`, `1y`, `2y`
+- Absolute: `2025-01-01..2025-12-31`
+- Default: 365 days (1 year)
+
+**Privacy:**
+- Regular users can only query their own stats
+- Deleted messages excluded by default (owner can include)
+- Only works in group chats (not private messages)
 
 ## Bot Health Monitoring
 

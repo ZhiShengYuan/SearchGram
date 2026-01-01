@@ -178,7 +178,27 @@ class HTTPSearchEngine(BasicSearchEngine):
         Returns:
             Dictionary payload for API
         """
-        return {
+        # Extract entities (mentions, hashtags, etc.)
+        entities = []
+        if hasattr(message, 'entities') and message.entities:
+            for entity in message.entities:
+                entity_dict = {
+                    "type": entity.type.name if hasattr(entity.type, 'name') else str(entity.type),
+                    "offset": entity.offset,
+                    "length": entity.length,
+                }
+                # For text mentions, include user information
+                if hasattr(entity, 'user') and entity.user:
+                    entity_dict["user_id"] = entity.user.id
+                    entity_dict["user"] = {
+                        "id": entity.user.id,
+                        "first_name": getattr(entity.user, 'first_name', ''),
+                        "last_name": getattr(entity.user, 'last_name', ''),
+                        "username": getattr(entity.user, 'username', ''),
+                    }
+                entities.append(entity_dict)
+
+        payload = {
             "id": f"{message.chat.id}-{message.id}",
             "message_id": message.id,
             "text": message.text or "",
@@ -197,7 +217,12 @@ class HTTPSearchEngine(BasicSearchEngine):
             },
             "date": int(message.date.timestamp()) if hasattr(message, 'date') and message.date else 0,
             "timestamp": int(message.date.timestamp()) if hasattr(message, 'date') and message.date else 0,
+            "entities": entities,
+            "is_deleted": False,
+            "deleted_at": 0,
         }
+
+        return payload
 
     def upsert(self, message: "types.Message") -> None:
         """
@@ -252,7 +277,8 @@ class HTTPSearchEngine(BasicSearchEngine):
         page: int = 1,
         mode: str = None,
         blocked_users: List[int] = None,
-        chat_id: int = None
+        chat_id: int = None,
+        include_deleted: bool = False
     ) -> Dict[str, Any]:
         """
         Search for messages.
@@ -265,6 +291,7 @@ class HTTPSearchEngine(BasicSearchEngine):
             mode: Search mode ('e' for exact, None for fuzzy)
             blocked_users: List of user IDs to exclude
             chat_id: Optional chat ID to filter results (for group-specific searches)
+            include_deleted: Include soft-deleted messages (owner only, default: False)
 
         Returns:
             Search results dict with hits, totalHits, totalPages, page, hitsPerPage
@@ -275,6 +302,7 @@ class HTTPSearchEngine(BasicSearchEngine):
             "page": page,
             "page_size": 10,
             "exact_match": (mode == 'e'),
+            "include_deleted": include_deleted,
         }
 
         if _type:
@@ -307,7 +335,7 @@ class HTTPSearchEngine(BasicSearchEngine):
             "totalPages": result.get("total_pages") or 0,
             "page": result.get("page") or 1,
             "hitsPerPage": result.get("hits_per_page") or 10,
-            "took_ms": took_ms,  # Include real timing from backend
+            "processingTimeMs": took_ms,  # Backend timing (renamed from took_ms for consistency)
         }
 
     def ping(self) -> Dict[str, Any]:
@@ -395,6 +423,77 @@ class HTTPSearchEngine(BasicSearchEngine):
             f"Deduplication complete: {duplicates_found} duplicates found, "
             f"{duplicates_removed} removed"
         )
+        return result
+
+    def soft_delete_message(self, chat_id: int, message_id: int) -> None:
+        """
+        Soft-delete a specific message (mark as deleted without removing).
+
+        Args:
+            chat_id: Chat ID
+            message_id: Message ID
+
+        Note: This is called by the on_deleted_messages handler.
+        """
+        # Prepare payload
+        payload = {
+            "chat_id": chat_id,
+            "message_id": message_id
+        }
+
+        # Make request to soft-delete endpoint
+        try:
+            result = self._make_request("POST", "/api/v1/messages/soft-delete", json=payload)
+            logging.info(f"Soft-deleted message {chat_id}-{message_id}: {result.get('message', 'Success')}")
+        except Exception as e:
+            logging.error(f"Failed to soft-delete message {chat_id}-{message_id}: {e}")
+            raise
+
+    def get_user_stats(
+        self,
+        group_id: int,
+        user_id: int,
+        from_timestamp: int,
+        to_timestamp: int,
+        include_mentions: bool = False,
+        include_deleted: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Get activity statistics for a user in a group.
+
+        Args:
+            group_id: Group/chat ID
+            user_id: User ID to get stats for
+            from_timestamp: Start of time window (Unix timestamp)
+            to_timestamp: End of time window (Unix timestamp)
+            include_mentions: Whether to count mentions
+            include_deleted: Include deleted messages (owner only)
+
+        Returns:
+            Dictionary with stats:
+            - user_message_count: int
+            - group_message_total: int
+            - user_ratio: float
+            - mentions_out: int (if include_mentions)
+            - mentions_in: int (if include_mentions)
+        """
+        payload = {
+            "group_id": group_id,
+            "user_id": user_id,
+            "from_timestamp": from_timestamp,
+            "to_timestamp": to_timestamp,
+            "include_mentions": include_mentions,
+            "include_deleted": include_deleted,
+        }
+
+        result = self._make_request("POST", "/api/v1/stats/user", json=payload)
+
+        logging.info(
+            f"User stats: {result.get('user_message_count', 0)} / "
+            f"{result.get('group_message_total', 0)} messages "
+            f"({result.get('user_ratio', 0):.1%})"
+        )
+
         return result
 
 

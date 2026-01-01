@@ -100,6 +100,18 @@ def message_edit_handler(client: "Client", message: "types.Message"):
     stats["edited"] += 1
 
 
+@app.on_deleted_messages()
+def deleted_messages_handler(client: "Client", messages: list["types.Message"]):
+    """Handle message deletion events via soft-delete."""
+    for message in messages:
+        logging.info("Soft-deleting message: %s-%s", message.chat.id, message.id)
+        try:
+            # Mark message as deleted in the backend
+            tgdb.soft_delete_message(message.chat.id, message.id)
+        except Exception as e:
+            logging.error(f"Failed to soft-delete message {message.chat.id}-{message.id}: {e}")
+
+
 def sync_history_new():
     """
     New sync system with resume capability and checkpoint support.

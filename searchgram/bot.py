@@ -23,6 +23,7 @@ from .config_loader import BOT_MODE, DATABASE_ENABLED, DATABASE_PATH, TOKEN
 from .db_manager import get_db_manager
 from .init_client import get_client
 from .privacy import privacy_manager
+from .time_utils import parse_time_window, format_time_window
 from .utils import setup_logger
 
 tgdb = SearchEngine()
@@ -131,6 +132,12 @@ def help_handler(client: "Client", message: "types.Message"):
 - `/block_me` - Opt-out: Your messages won't appear in anyone's search
 - `/unblock_me` - Opt-in: Allow your messages in search results
 - `/privacy_status` - Check your current privacy status
+
+**📊 Activity Stats (Group Only):**
+- `/mystats` - Your activity in the last year
+- `/mystats 30d` - Your activity in the last 30 days
+- `/mystats 90d at` - Last 90 days with mention counts
+- `/mystats 2025-01-01..2025-12-31` - Custom date range
 
 {f'''**🛠️ Admin Commands (Owner Only):**
 - `/ping` - Comprehensive health check (engine, messages, privacy, logs, config)
@@ -824,6 +831,107 @@ async def send_method_callback(client: "Client", callback_query: types.CallbackQ
     # Reschedule auto-deletion for the updated message (reset 120s timer) in groups only
     if new_markup and message.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
         asyncio.create_task(schedule_message_deletion(client, message.chat.id, message.id))
+
+
+@app.on_message(filters.command(["mystats"]))
+@require_access
+async def mystats_handler(client: "Client", message: "types.Message"):
+    """Show user's activity stats in the current group."""
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    user = message.from_user
+    if not user:
+        await message.reply_text("❌ Could not identify your user ID.", quote=True)
+        return
+
+    # Only work in group chats
+    if message.chat.type not in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+        await message.reply_text(
+            "❌ This command only works in group chats.\n\n"
+            "Use it in a group to see your activity stats!",
+            quote=True
+        )
+        return
+
+    # Parse command arguments
+    parts = message.text.split(maxsplit=2)
+    time_window = "365d"  # Default: 1 year
+    include_mentions = False
+
+    # Parse arguments: /mystats [time_window] [at]
+    if len(parts) >= 2:
+        # Check if second arg is "at" flag
+        if parts[1].lower() == "at":
+            include_mentions = True
+        else:
+            time_window = parts[1]
+            # Check for "at" flag in third position
+            if len(parts) >= 3 and parts[2].lower() == "at":
+                include_mentions = True
+
+    # Parse time window
+    try:
+        from_ts, to_ts = parse_time_window(time_window)
+    except ValueError as e:
+        await message.reply_text(
+            f"❌ Invalid time window: {e}\n\n"
+            "**Supported formats:**\n"
+            "- `7d`, `30d`, `90d`, `365d`, `1y`\n"
+            "- `2025-01-01..2025-12-31`\n\n"
+            "**Examples:**\n"
+            "- `/mystats` - Last 1 year\n"
+            "- `/mystats 30d` - Last 30 days\n"
+            "- `/mystats 90d at` - Last 90 days with mentions\n"
+            "- `/mystats 2025-01-01..2025-12-31 at` - Date range with mentions",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        return
+
+    # Get stats from backend
+    try:
+        stats = tgdb.get_user_stats(
+            group_id=message.chat.id,
+            user_id=user.id,
+            from_timestamp=from_ts,
+            to_timestamp=to_ts,
+            include_mentions=include_mentions,
+            include_deleted=False  # Regular users never see deleted
+        )
+
+        # Format response
+        user_count = stats["user_message_count"]
+        group_total = stats["group_message_total"]
+        ratio = stats["user_ratio"]
+        time_desc = format_time_window(from_ts, to_ts)
+
+        response = f"📊 **Your Activity Stats**\n\n"
+        response += f"**Group:** {message.chat.title or 'This Group'}\n"
+        response += f"**Period:** {time_desc}\n\n"
+
+        if group_total == 0:
+            response += "No messages found in this time period."
+        else:
+            response += f"**Your Messages:** {user_count:,}\n"
+            response += f"**Group Total:** {group_total:,}\n"
+            response += f"**Your Share:** {ratio:.1%}\n"
+
+            if include_mentions:
+                mentions_out = stats.get("mentions_out", 0)
+                mentions_in = stats.get("mentions_in", 0)
+                response += f"\n**Mentions:**\n"
+                response += f"  • You mentioned others: {mentions_out:,} times\n"
+                response += f"  • Others mentioned you: {mentions_in:,} times\n"
+
+        await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logging.exception("Error getting user stats")
+        await message.reply_text(
+            f"❌ Error retrieving stats: {str(e)}\n\n"
+            "Please try again or contact the bot owner.",
+            quote=True
+        )
 
 
 @app.on_message(filters.command(["logs", "query_logs"]))
