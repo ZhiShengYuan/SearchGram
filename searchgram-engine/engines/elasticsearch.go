@@ -288,6 +288,21 @@ func (e *ElasticsearchEngine) UpsertBatch(messages []models.Message) (int, []str
 func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchResponse, error) {
 	ctx := context.Background()
 
+	// DEBUG: Log incoming search request
+	log.WithFields(log.Fields{
+		"keyword":         req.Keyword,
+		"keyword_bytes":   []byte(req.Keyword),
+		"keyword_len":     len(req.Keyword),
+		"exact_match":     req.ExactMatch,
+		"chat_type":       req.ChatType,
+		"username":        req.Username,
+		"chat_id":         req.ChatID,
+		"blocked_users":   req.BlockedUsers,
+		"include_deleted": req.IncludeDeleted,
+		"page":            req.Page,
+		"page_size":       req.PageSize,
+	}).Info("DEBUG: Incoming search request")
+
 	// Build the query
 	boolQuery := elastic.NewBoolQuery()
 
@@ -297,10 +312,15 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 			// Exact match using match_phrase
 			matchQuery := elastic.NewMatchPhraseQuery("text.exact", req.Keyword)
 			boolQuery.Must(matchQuery)
+			log.WithField("query_type", "exact_match_phrase").Info("DEBUG: Using exact match query")
 		} else {
 			// Fuzzy match using standard analyzer
-			matchQuery := elastic.NewMatchQuery("text", req.Keyword).Fuzziness("AUTO")
+			// NOTE: Fuzziness removed for CJK compatibility
+			// CJK bigram tokenization doesn't work well with AUTO fuzziness
+			// because bigrams are only 2 characters long and must match exactly with AUTO
+			matchQuery := elastic.NewMatchQuery("text", req.Keyword)
 			boolQuery.Must(matchQuery)
+			log.WithField("query_type", "fuzzy_match").Info("DEBUG: Using fuzzy match query")
 		}
 	}
 
@@ -346,6 +366,15 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 	}
 	from := (req.Page - 1) * req.PageSize
 
+	// DEBUG: Log the final query
+	querySource, _ := boolQuery.Source()
+	log.WithFields(log.Fields{
+		"query":     querySource,
+		"from":      from,
+		"size":      req.PageSize,
+		"index":     e.index,
+	}).Info("DEBUG: Executing Elasticsearch query")
+
 	// Execute search
 	searchResult, err := e.client.Search().
 		Index(e.index).
@@ -357,8 +386,16 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 		Do(ctx)
 
 	if err != nil {
+		log.WithError(err).Error("DEBUG: Elasticsearch query failed")
 		return nil, fmt.Errorf("search query failed: %w", err)
 	}
+
+	// DEBUG: Log search results
+	log.WithFields(log.Fields{
+		"total_hits":    searchResult.Hits.TotalHits.Value,
+		"returned_hits": len(searchResult.Hits.Hits),
+		"took_ms":       searchResult.TookInMillis,
+	}).Info("DEBUG: Search results received")
 
 	// Parse results
 	var messages []models.Message
