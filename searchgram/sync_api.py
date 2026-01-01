@@ -14,6 +14,7 @@ from typing import Optional
 from flask import Flask, jsonify, request
 
 from .config_loader import get_config
+from .jwt_auth import load_jwt_auth_from_config
 
 # Flask app for sync API
 app = Flask(__name__)
@@ -21,12 +22,57 @@ app = Flask(__name__)
 # Global sync manager reference (set by client.py)
 _sync_manager = None
 
+# Global JWT authenticator (initialized in init_sync_api)
+_jwt_auth = None
+
 
 def init_sync_api(sync_manager):
     """Initialize the sync API with a sync manager instance."""
-    global _sync_manager
+    global _sync_manager, _jwt_auth
     _sync_manager = sync_manager
+
+    # Initialize JWT authentication
+    # This service receives requests from the bot, so:
+    # - issuer: "userbot" (this service)
+    # - audience: "userbot" (expected in incoming tokens)
+    try:
+        _jwt_auth = load_jwt_auth_from_config(issuer="userbot", audience="userbot")
+        if _jwt_auth:
+            logging.info("Sync API initialized with JWT authentication enabled")
+        else:
+            logging.warning("Sync API initialized WITHOUT authentication - not recommended for production")
+    except Exception as e:
+        logging.error(f"Failed to initialize JWT auth for sync API: {e}")
+        # Continue without auth but log the error
+        _jwt_auth = None
+
     logging.info("Sync API initialized")
+
+
+def require_jwt_auth(allowed_issuers=None):
+    """
+    Decorator for Flask routes that require JWT authentication.
+
+    Args:
+        allowed_issuers: List of allowed issuer values (e.g., ["bot"])
+    """
+    def decorator(f):
+        def wrapper(*args, **kwargs):
+            # If JWT auth is not configured, allow request (backward compatibility)
+            if not _jwt_auth:
+                logging.debug(f"JWT auth not configured, allowing request to {request.path}")
+                return f(*args, **kwargs)
+
+            # Apply JWT authentication
+            from functools import wraps
+            @wraps(f)
+            @_jwt_auth.flask_middleware(allowed_issuers=allowed_issuers)
+            def authenticated_handler(*args, **kwargs):
+                return f(*args, **kwargs)
+
+            return authenticated_handler(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 @app.route('/health', methods=['GET'])
@@ -39,6 +85,7 @@ def health():
 
 
 @app.route('/api/v1/sync', methods=['POST'])
+@require_jwt_auth(allowed_issuers=["bot"])
 def add_sync():
     """
     Add a chat to the sync queue.
@@ -55,6 +102,8 @@ def add_sync():
         "chat_id": -1001234567890,
         "message": "Chat added to sync queue"
     }
+
+    Authentication: Requires JWT with issuer "bot"
     """
     if not _sync_manager:
         return jsonify({"error": "Sync manager not initialized"}), 500
@@ -98,6 +147,7 @@ def add_sync():
 
 
 @app.route('/api/v1/sync/status', methods=['GET'])
+@require_jwt_auth(allowed_issuers=["bot"])
 def get_sync_status():
     """
     Get sync status for all tasks or a specific chat.
@@ -123,6 +173,8 @@ def get_sync_status():
             }
         ]
     }
+
+    Authentication: Requires JWT with issuer "bot"
     """
     if not _sync_manager:
         return jsonify({"error": "Sync manager not initialized"}), 500
@@ -154,6 +206,7 @@ def get_sync_status():
 
 
 @app.route('/api/v1/sync/pause', methods=['POST'])
+@require_jwt_auth(allowed_issuers=["bot"])
 def pause_sync():
     """
     Pause a sync task.
@@ -169,6 +222,8 @@ def pause_sync():
         "chat_id": -1001234567890,
         "message": "Sync paused"
     }
+
+    Authentication: Requires JWT with issuer "bot"
     """
     if not _sync_manager:
         return jsonify({"error": "Sync manager not initialized"}), 500
@@ -201,6 +256,7 @@ def pause_sync():
 
 
 @app.route('/api/v1/sync/resume', methods=['POST'])
+@require_jwt_auth(allowed_issuers=["bot"])
 def resume_sync():
     """
     Resume a paused sync task.
@@ -216,6 +272,8 @@ def resume_sync():
         "chat_id": -1001234567890,
         "message": "Sync resumed"
     }
+
+    Authentication: Requires JWT with issuer "bot"
     """
     if not _sync_manager:
         return jsonify({"error": "Sync manager not initialized"}), 500

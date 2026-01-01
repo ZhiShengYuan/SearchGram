@@ -11,12 +11,15 @@ from typing import Dict, List, Optional
 
 import httpx
 
+from .jwt_auth import load_jwt_auth_from_config
+
 
 class SyncHTTPClient:
     """
     HTTP client for sync API operations.
 
     Communicates with the sync API server running on the client process.
+    Includes JWT authentication support.
     """
 
     def __init__(self, base_url: str = "http://127.0.0.1:5000", timeout: int = 30):
@@ -30,7 +33,39 @@ class SyncHTTPClient:
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
         self.client = httpx.Client(timeout=timeout, http2=True)
-        logging.info(f"Sync HTTP client initialized: {self.base_url}")
+
+        # Initialize JWT authentication
+        # This client is used by the bot to call userbot API, so:
+        # - issuer: "bot" (this service)
+        # - audience: "userbot" (target service)
+        try:
+            self.jwt_auth = load_jwt_auth_from_config(issuer="bot", audience="userbot")
+            if self.jwt_auth:
+                logging.info(f"Sync HTTP client initialized with JWT auth: {self.base_url}")
+            else:
+                logging.warning(f"Sync HTTP client initialized WITHOUT JWT auth: {self.base_url}")
+        except Exception as e:
+            logging.error(f"Failed to initialize JWT auth for sync HTTP client: {e}")
+            self.jwt_auth = None
+
+    def _get_headers(self) -> Dict[str, str]:
+        """
+        Get request headers including JWT token if available.
+
+        Returns:
+            Dict of HTTP headers
+        """
+        headers = {"Content-Type": "application/json"}
+
+        # Add JWT token if authentication is configured
+        if self.jwt_auth:
+            try:
+                token = self.jwt_auth.generate_token()
+                headers["Authorization"] = f"Bearer {token}"
+            except Exception as e:
+                logging.warning(f"Failed to generate JWT token: {e}")
+
+        return headers
 
     def add_sync(self, chat_id: int, requested_by: Optional[int] = None) -> Dict:
         """
@@ -51,7 +86,7 @@ class SyncHTTPClient:
         if requested_by:
             payload["requested_by"] = requested_by
 
-        response = self.client.post(url, json=payload)
+        response = self.client.post(url, json=payload, headers=self._get_headers())
         response.raise_for_status()
         return response.json()
 
@@ -71,7 +106,7 @@ class SyncHTTPClient:
         url = f"{self.base_url}/api/v1/sync/status"
         params = {"chat_id": chat_id} if chat_id else {}
 
-        response = self.client.get(url, params=params)
+        response = self.client.get(url, params=params, headers=self._get_headers())
         response.raise_for_status()
         return response.json()
 
@@ -91,7 +126,7 @@ class SyncHTTPClient:
         url = f"{self.base_url}/api/v1/sync/pause"
         payload = {"chat_id": chat_id}
 
-        response = self.client.post(url, json=payload)
+        response = self.client.post(url, json=payload, headers=self._get_headers())
         response.raise_for_status()
         return response.json()
 
@@ -111,7 +146,7 @@ class SyncHTTPClient:
         url = f"{self.base_url}/api/v1/sync/resume"
         payload = {"chat_id": chat_id}
 
-        response = self.client.post(url, json=payload)
+        response = self.client.post(url, json=payload, headers=self._get_headers())
         response.raise_for_status()
         return response.json()
 
