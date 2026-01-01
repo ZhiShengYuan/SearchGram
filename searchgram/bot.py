@@ -962,8 +962,19 @@ async def mystats_handler(client: "Client", message: "types.Message"):
     user = message.from_user
     sender_chat = message.sender_chat
 
-    # Support both users and channels
-    if not user and not sender_chat:
+    # For now, only support regular users (not channels)
+    if not user and sender_chat:
+        sent_msg = await message.reply_text(
+            "❌ **Channel Stats Not Yet Supported**\n\n"
+            "The `/mystats` command currently only works for individual users.\n\n"
+            "💡 **Tip**: Send this command as yourself (not as the channel) to see your personal stats.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        await auto_delete_in_groups(client, message, sent_msg)
+        return
+
+    if not user:
         sent_msg = await message.reply_text("❌ Could not identify sender.", quote=True)
         await auto_delete_in_groups(client, message, sent_msg)
         return
@@ -1014,19 +1025,14 @@ async def mystats_handler(client: "Client", message: "types.Message"):
         await auto_delete_in_groups(client, message, sent_msg)
         return
 
-    # Determine sender ID - use channel ID if sent from channel, otherwise user ID
-    sender_id = sender_chat.id if sender_chat else user.id
-    sender_name = sender_chat.title if sender_chat else (user.first_name or user.username or "You")
-    is_channel = sender_chat is not None
-
-    # Get stats from backend
+    # Get stats from backend (user only, channels not supported yet)
     try:
         stats = tgdb.get_user_stats(
             group_id=message.chat.id,
-            user_id=sender_id,
+            user_id=user.id,
             from_timestamp=from_ts,
             to_timestamp=to_ts,
-            include_mentions=include_mentions and not is_channel,  # No mention stats for channels
+            include_mentions=include_mentions,
             include_deleted=False  # Regular users never see deleted
         )
 
@@ -1036,23 +1042,18 @@ async def mystats_handler(client: "Client", message: "types.Message"):
         ratio = stats["user_ratio"]
         time_desc = format_time_window(from_ts, to_ts)
 
-        entity_type = "Channel" if is_channel else "Your"
-        response = f"📊 **{entity_type} Activity Stats**\n\n"
-        if is_channel:
-            response += f"**Channel:** {sender_name}\n"
+        response = f"📊 **Your Activity Stats**\n\n"
         response += f"**Group:** {message.chat.title or 'This Group'}\n"
         response += f"**Period:** {time_desc}\n\n"
 
         if group_total == 0:
             response += "No messages found in this time period."
         else:
-            label = "Channel Messages" if is_channel else "Your Messages"
-            share_label = "Channel Share" if is_channel else "Your Share"
-            response += f"**{label}:** {user_count:,}\n"
+            response += f"**Your Messages:** {user_count:,}\n"
             response += f"**Group Total:** {group_total:,}\n"
-            response += f"**{share_label}:** {ratio:.1%}\n"
+            response += f"**Your Share:** {ratio:.1%}\n"
 
-            if include_mentions and not is_channel:
+            if include_mentions:
                 mentions_out = stats.get("mentions_out", 0)
                 mentions_in = stats.get("mentions_in", 0)
                 response += f"\n**Mentions:**\n"
