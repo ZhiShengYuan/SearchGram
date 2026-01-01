@@ -95,20 +95,39 @@ func main() {
 	router.Use(middleware.CORS())
 	router.Use(middleware.RequestLogger())
 
-	// Choose auth middleware
+	// Public endpoints (no auth required)
+	// Root endpoint
+	router.GET("/", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"service": "SearchGram Search Engine",
+			"version": "1.0.0",
+			"engine":  cfg.SearchEngine.Type,
+			"status":  "running",
+		})
+	})
+
+	// Health check endpoint (no auth required for monitoring)
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "healthy",
+		})
+	})
+
+	// Protected API routes with authentication
+	v1 := router.Group("/api/v1")
+
+	// Apply auth middleware to API routes only
 	if cfg.Auth.UseJWT && jwtAuth != nil {
 		// Use JWT auth for all API routes
 		allowedIssuers := []string{"bot", "userbot", "search"}
-		router.Use(jwtAuth.Middleware(allowedIssuers))
+		v1.Use(jwtAuth.Middleware(allowedIssuers))
 	} else if cfg.Auth.Enabled {
 		// Fall back to legacy API key auth
-		router.Use(middleware.APIKeyAuth(cfg.Auth.Enabled, cfg.Auth.APIKey))
+		v1.Use(middleware.APIKeyAuth(cfg.Auth.Enabled, cfg.Auth.APIKey))
 	} else {
-		log.Warn("⚠️  Authentication is DISABLED - this is not recommended for production")
+		log.Warn("Authentication is DISABLED - this is not recommended for production")
 	}
 
-	// API routes
-	v1 := router.Group("/api/v1")
 	{
 		// Message operations
 		v1.POST("/upsert", apiHandler.Upsert)
@@ -128,23 +147,6 @@ func main() {
 		v1.GET("/status", apiHandler.Status)
 		v1.POST("/stats/user", apiHandler.UserStats)
 	}
-
-	// Root endpoint
-	router.GET("/", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"service": "SearchGram Search Engine",
-			"version": "1.0.0",
-			"engine":  cfg.SearchEngine.Type,
-			"status":  "running",
-		})
-	})
-
-	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "healthy",
-		})
-	})
 
 	// Create HTTP/2 handler with h2c (HTTP/2 Cleartext) support
 	// This allows HTTP/2 over plain HTTP connections without TLS

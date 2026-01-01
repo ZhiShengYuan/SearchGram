@@ -125,6 +125,14 @@ func Load(configPath string) (*Config, error) {
 			}
 		}
 
+		// Override server config from http section if present (for consistency)
+		if v.IsSet("http.listen") {
+			cfg.Server.Host = v.GetString("http.listen")
+		}
+		if v.IsSet("http.search_port") {
+			cfg.Server.Port = v.GetInt("http.search_port")
+		}
+
 		// Set search engine type to elasticsearch (only supported type)
 		cfg.SearchEngine.Type = "elasticsearch"
 	} else {
