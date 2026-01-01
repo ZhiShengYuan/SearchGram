@@ -932,7 +932,22 @@ async def mystats_handler(client: "Client", message: "types.Message"):
     """Show user's activity stats in the current group."""
     await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
+    # Check if message is from a user or a channel
     user = message.from_user
+    sender_chat = message.sender_chat
+
+    # If sent from a channel (sender_chat) instead of a user, explain the limitation
+    if not user and sender_chat:
+        await message.reply_text(
+            "❌ **Channel Messages Not Supported**\n\n"
+            "This command doesn't work for messages sent from channels or when you post anonymously as a channel admin.\n\n"
+            "💡 **Tip**: Send this command as yourself (not as the channel) to see your stats.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        return
+
+    # If neither user nor sender_chat, something is wrong
     if not user:
         await message.reply_text("❌ Could not identify your user ID.", quote=True)
         return
