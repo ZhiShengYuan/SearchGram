@@ -194,7 +194,7 @@ See config.example.json for reference.
 try:
     _config_loader = ConfigLoader()
 except ConfigurationError as e:
-    print(f"\n❌ Configuration Error: {e}\n", file=sys.stderr)
+    print(f"\nConfiguration Error: {e}\n", file=sys.stderr)
     sys.exit(1)
 
 

@@ -10,7 +10,7 @@ from .config_loader import ENGINE
 AVAILABLE_ENGINES = ["http"]
 
 if ENGINE == "http":
-    print("✅ Using HTTP (Go service) search engine with JWT authentication")
+    print("Using HTTP (Go service) search engine with JWT authentication")
     from .http_engine import SearchEngine
 else:
     raise ValueError(
