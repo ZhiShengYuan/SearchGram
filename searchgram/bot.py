@@ -23,6 +23,7 @@ from .config_loader import BOT_MODE, DATABASE_ENABLED, DATABASE_PATH, TOKEN
 from .db_manager import get_db_manager
 from .init_client import get_client
 from .privacy import privacy_manager
+from .sync_ipc import SyncIPCWriter
 from .time_utils import parse_time_window, format_time_window
 from .utils import setup_logger
 
@@ -30,6 +31,9 @@ tgdb = SearchEngine()
 
 setup_logger()
 app = get_client(TOKEN)
+
+# Initialize IPC writer for sync commands
+sync_ipc = SyncIPCWriter()
 
 # Custom filter to exclude all command messages (starting with /)
 def not_command_filter(_, __, message: types.Message):
@@ -174,6 +178,13 @@ async def help_handler(client: "Client", message: "types.Message"):
 - `/logstats` - View query statistics
 - `/settings [key] [value]` - View/update database settings
 - `/cleanup_logs` - Clean up old query logs
+
+**📥 Sync Commands (Owner Only):**
+- `/sync <chat_id>` - Add a chat to sync queue
+- `/sync_status` - Check all sync tasks progress
+- `/sync_pause <chat_id>` - Pause an ongoing sync
+- `/sync_resume <chat_id>` - Resume a paused sync
+- `/sync_list` - List all sync tasks (same as /sync_status)
 ''' if access_controller.is_owner(user.id if user else 0) else ''}
 **⚙️ Bot Mode:** {BOT_MODE}
 {f"**Blocked Users:** {privacy_manager.get_blocked_count()}" if access_controller.is_owner(user.id if user else 0) else ""}
@@ -1284,6 +1295,233 @@ async def cleanup_logs_handler(client: "Client", message: "types.Message"):
     except Exception as e:
         logging.exception("Error cleaning up logs")
         await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["sync"]))
+@require_owner
+async def sync_handler(client: "Client", message: "types.Message"):
+    """Add a chat to the sync queue (owner only)."""
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        # Parse command arguments
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            await message.reply_text(
+                "❌ **Usage:** `/sync <chat_id>`\n\n"
+                "Examples:\n"
+                "• `/sync -1001234567890` - Sync a specific group\n"
+                "• `/sync 123456789` - Sync a user/channel by ID\n\n"
+                "**Tip:** Use `/sync_status` to check ongoing syncs",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+            return
+
+        # Extract chat ID
+        try:
+            chat_id = int(args[1].strip())
+        except ValueError:
+            await message.reply_text(
+                "❌ Invalid chat ID. Must be a numeric ID (e.g., -1001234567890)",
+                quote=True
+            )
+            return
+
+        # Send command to client process via IPC
+        user_id = message.from_user.id if message.from_user else 0
+        command_id = sync_ipc.send_command("add", chat_id=chat_id, requested_by=user_id)
+
+        await message.reply_text(
+            f"✅ **Sync task submitted!**\n\n"
+            f"Chat ID: `{chat_id}`\n"
+            f"Command ID: `{command_id}`\n\n"
+            f"The client process will start syncing this chat shortly.\n"
+            f"Use `/sync_status` to monitor progress.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+
+    except Exception as e:
+        logging.exception("Error submitting sync task")
+        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["sync_status"]))
+@require_owner
+async def sync_status_handler(client: "Client", message: "types.Message"):
+    """Check sync status for all tasks (owner only)."""
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        # Read status from IPC
+        status = sync_ipc.get_status()
+
+        if not status or not status.get("chats"):
+            await message.reply_text(
+                "ℹ️ **No active sync tasks**\n\n"
+                "Use `/sync <chat_id>` to start syncing a chat.",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+            return
+
+        # Format status message
+        response = "📊 **Sync Status**\n\n"
+        response += f"Last Updated: `{status.get('last_updated', 'Unknown')}`\n\n"
+
+        chats = status.get("chats", [])
+        for chat_data in chats:
+            chat_id = chat_data.get("chat_id", "Unknown")
+            status_str = chat_data.get("status", "unknown")
+            progress_percent = chat_data.get("progress_percent", 0)
+            synced = chat_data.get("synced_count", 0)
+            total = chat_data.get("total_count", 0)
+            error_count = chat_data.get("error_count", 0)
+            last_error = chat_data.get("last_error")
+
+            # Status emoji
+            status_emoji = {
+                "pending": "⏳",
+                "in_progress": "🔄",
+                "completed": "✅",
+                "failed": "❌",
+                "paused": "⏸️"
+            }.get(status_str, "❓")
+
+            response += f"**Chat {chat_id}**\n"
+            response += f"  Status: {status_emoji} {status_str}\n"
+            response += f"  Progress: {progress_percent}% ({synced:,}/{total:,})\n"
+
+            if error_count > 0:
+                response += f"  Errors: {error_count}\n"
+            if last_error and status_str == "failed":
+                response += f"  Last Error: `{last_error[:100]}`\n"
+
+            response += "\n"
+
+        # Add summary
+        pending = sum(1 for c in chats if c.get("status") == "pending")
+        in_progress = sum(1 for c in chats if c.get("status") == "in_progress")
+        completed = sum(1 for c in chats if c.get("status") == "completed")
+        failed = sum(1 for c in chats if c.get("status") == "failed")
+        paused = sum(1 for c in chats if c.get("status") == "paused")
+
+        response += f"**Summary:**\n"
+        response += f"• Pending: {pending}\n"
+        response += f"• In Progress: {in_progress}\n"
+        response += f"• Completed: {completed}\n"
+        if paused > 0:
+            response += f"• Paused: {paused}\n"
+        if failed > 0:
+            response += f"• Failed: {failed}\n"
+
+        await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logging.exception("Error getting sync status")
+        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["sync_pause"]))
+@require_owner
+async def sync_pause_handler(client: "Client", message: "types.Message"):
+    """Pause an ongoing sync task (owner only)."""
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        # Parse command arguments
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            await message.reply_text(
+                "❌ **Usage:** `/sync_pause <chat_id>`\n\n"
+                "Example: `/sync_pause -1001234567890`",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+            return
+
+        # Extract chat ID
+        try:
+            chat_id = int(args[1].strip())
+        except ValueError:
+            await message.reply_text(
+                "❌ Invalid chat ID. Must be a numeric ID",
+                quote=True
+            )
+            return
+
+        # Send pause command to client
+        user_id = message.from_user.id if message.from_user else 0
+        command_id = sync_ipc.send_command("pause", chat_id=chat_id, requested_by=user_id)
+
+        await message.reply_text(
+            f"⏸️ **Pause command sent!**\n\n"
+            f"Chat ID: `{chat_id}`\n"
+            f"Command ID: `{command_id}`\n\n"
+            f"The sync will pause at the next checkpoint.\n"
+            f"Use `/sync_resume {chat_id}` to continue.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+
+    except Exception as e:
+        logging.exception("Error pausing sync")
+        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["sync_resume"]))
+@require_owner
+async def sync_resume_handler(client: "Client", message: "types.Message"):
+    """Resume a paused sync task (owner only)."""
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    try:
+        # Parse command arguments
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            await message.reply_text(
+                "❌ **Usage:** `/sync_resume <chat_id>`\n\n"
+                "Example: `/sync_resume -1001234567890`",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+            return
+
+        # Extract chat ID
+        try:
+            chat_id = int(args[1].strip())
+        except ValueError:
+            await message.reply_text(
+                "❌ Invalid chat ID. Must be a numeric ID",
+                quote=True
+            )
+            return
+
+        # Send resume command to client
+        user_id = message.from_user.id if message.from_user else 0
+        command_id = sync_ipc.send_command("resume", chat_id=chat_id, requested_by=user_id)
+
+        await message.reply_text(
+            f"▶️ **Resume command sent!**\n\n"
+            f"Chat ID: `{chat_id}`\n"
+            f"Command ID: `{command_id}`\n\n"
+            f"The sync will resume from the last checkpoint.\n"
+            f"Use `/sync_status` to monitor progress.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+
+    except Exception as e:
+        logging.exception("Error resuming sync")
+        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+
+
+@app.on_message(filters.command(["sync_list"]))
+@require_owner
+async def sync_list_handler(client: "Client", message: "types.Message"):
+    """List all sync tasks with their status (owner only). Alias for /sync_status."""
+    await sync_status_handler(client, message)
 
 
 if __name__ == "__main__":

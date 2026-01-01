@@ -405,6 +405,58 @@ class SyncManager:
         with self.lock:
             return list(self.progress_map.values())
 
+    def pause_chat(self, chat_id: int) -> bool:
+        """
+        Pause a sync task for a specific chat.
+
+        Args:
+            chat_id: Chat ID to pause
+
+        Returns:
+            bool: True if paused, False if not found or invalid state
+        """
+        with self.lock:
+            if chat_id not in self.progress_map:
+                logging.warning(f"Cannot pause chat {chat_id}: not in sync queue")
+                return False
+
+            progress = self.progress_map[chat_id]
+
+            if progress.status in ("pending", "in_progress"):
+                progress.status = "paused"
+                self._save_checkpoint()
+                logging.info(f"Paused sync for chat {chat_id}")
+                return True
+            else:
+                logging.warning(f"Cannot pause chat {chat_id}: status is {progress.status}")
+                return False
+
+    def resume_chat(self, chat_id: int) -> bool:
+        """
+        Resume a paused sync task for a specific chat.
+
+        Args:
+            chat_id: Chat ID to resume
+
+        Returns:
+            bool: True if resumed, False if not found or invalid state
+        """
+        with self.lock:
+            if chat_id not in self.progress_map:
+                logging.warning(f"Cannot resume chat {chat_id}: not in sync queue")
+                return False
+
+            progress = self.progress_map[chat_id]
+
+            if progress.status == "paused":
+                progress.status = "pending"
+                self._save_checkpoint()
+                logging.info(f"Resumed sync for chat {chat_id}")
+                return True
+            else:
+                logging.warning(f"Cannot resume chat {chat_id}: status is {progress.status}")
+                return False
+
     def clear_completed(self):
         """Remove completed chats from the queue."""
         with self.lock:

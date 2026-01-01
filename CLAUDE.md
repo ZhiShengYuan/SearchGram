@@ -262,6 +262,13 @@ Tests currently cover the argument parser for search query syntax.
 - `/settings [key] [value]` - View or update database settings
 - `/cleanup_logs` - Clean up old query logs based on retention settings
 
+**Sync Commands (Owner Only):**
+- `/sync <chat_id>` - Add a chat to the sync queue for indexing
+- `/sync_status` - Check progress of all sync tasks
+- `/sync_pause <chat_id>` - Pause an ongoing sync task
+- `/sync_resume <chat_id>` - Resume a paused sync task
+- `/sync_list` - List all sync tasks (alias for /sync_status)
+
 **Search Syntax:**
 - Global search: Just send any text message
 - Type filter: `-t=GROUP keyword`
@@ -305,6 +312,159 @@ The bot will show:
 - Thread-safe operation with status updates
 
 **Note:** The upsert operations are designed to be idempotent (using document IDs), so duplicates should be rare. However, this command provides a way to manually clean up the database if needed.
+
+## Bot-Controlled Sync System (IPC)
+
+SearchGram supports **on-demand chat synchronization** via bot commands using an IPC (Inter-Process Communication) mechanism. This allows the bot owner to trigger indexing tasks from the bot interface without modifying `config.json`.
+
+### Architecture
+
+**IPC Files:**
+- `sync_commands.json` - Bot writes commands, client reads and processes
+- `sync_status.json` - Client writes status, bot reads for monitoring
+
+**Components:**
+1. **Bot Side** (`sync_ipc.SyncIPCWriter`):
+   - Sends commands to client process via JSON file
+   - Reads sync status from client
+   - Provides real-time progress updates to user
+
+2. **Client Side** (`sync_ipc.SyncIPCReader`):
+   - Monitors commands file every 2 seconds
+   - Processes commands (add, pause, resume)
+   - Updates status file with progress
+   - Integrates with `SyncManager` for actual syncing
+
+### Bot Commands
+
+**Add Chat to Sync Queue:**
+```bash
+/sync -1001234567890
+```
+- Adds chat to sync queue
+- Client starts syncing immediately
+- Returns command ID for tracking
+
+**Check Sync Status:**
+```bash
+/sync_status
+```
+Shows:
+- Progress percentage for each chat
+- Status: pending, in_progress, completed, failed, paused
+- Error counts and last error message
+- Summary statistics
+
+**Pause Sync:**
+```bash
+/sync_pause -1001234567890
+```
+- Pauses sync at next checkpoint
+- Preserves progress for resume
+
+**Resume Sync:**
+```bash
+/sync_resume -1001234567890
+```
+- Continues from last checkpoint
+- Triggers sync in background thread
+
+**List All Syncs:**
+```bash
+/sync_list
+```
+Alias for `/sync_status`.
+
+### How It Works
+
+1. **Bot receives command** (e.g., `/sync -1001234567890`)
+2. **Bot writes to `sync_commands.json`**:
+   ```json
+   {
+     "commands": [{
+       "command_id": "add_-1001234567890_1735689600000",
+       "action": "add",
+       "chat_id": -1001234567890,
+       "requested_by": 123456789,
+       "timestamp": "2026-01-01T00:00:00"
+     }]
+   }
+   ```
+3. **Client IPC handler** (runs every 2s):
+   - Reads commands from file
+   - Calls `sync_manager.add_chat(chat_id)`
+   - Starts sync thread
+   - Clears commands file
+4. **Client updates status** to `sync_status.json`:
+   ```json
+   {
+     "chats": [{
+       "chat_id": -1001234567890,
+       "status": "in_progress",
+       "progress_percent": 45.2,
+       "synced_count": 4520,
+       "total_count": 10000,
+       "error_count": 0
+     }]
+   }
+   ```
+5. **Bot reads status** when user runs `/sync_status`
+
+### Features
+
+**Resume Capability:**
+- Progress saved to `sync_progress.json` after each batch
+- Survives client restarts
+- Automatic resume on startup (controlled by `SYNC_RESUME_ON_RESTART`)
+
+**Error Handling:**
+- Retry logic with configurable max retries
+- FloodWait handling (automatic waiting)
+- Detailed error logging in status file
+
+**Thread Safety:**
+- Atomic file writes (temp file + rename)
+- Lock-based synchronization in SyncManager
+- Status updates don't block sync operations
+
+**Batch Processing:**
+- Configurable batch size (default: 100 messages)
+- Delay between batches to avoid rate limits
+- Bulk insert support for efficiency
+
+### Configuration
+
+No additional configuration needed. The system uses existing sync settings:
+- `SYNC_BATCH_SIZE`: Messages per batch
+- `SYNC_RETRY_ON_ERROR`: Enable retry logic
+- `SYNC_MAX_RETRIES`: Max retry attempts
+- `SYNC_DELAY_BETWEEN_BATCHES`: Delay in seconds
+
+### Use Cases
+
+**On-Demand Indexing:**
+- User joins a new group → owner runs `/sync -1001234567890`
+- Historical messages needed → add to queue without restart
+
+**Progress Monitoring:**
+- Long-running syncs → check with `/sync_status`
+- Verify completion before queries
+
+**Rate Limit Management:**
+- Hit FloodWait → pause with `/sync_pause`
+- Wait for cooldown → resume with `/sync_resume`
+
+**Multiple Chats:**
+- Queue multiple chats
+- Process in parallel threads
+- Monitor all with single status command
+
+### Implementation Files
+
+- `searchgram/sync_ipc.py` - IPC classes (SyncCommand, SyncIPCWriter, SyncIPCReader)
+- `searchgram/bot.py` - Bot command handlers (/sync, /sync_status, etc.)
+- `searchgram/client.py` - IPC handler thread (ipc_command_handler)
+- `searchgram/sync_manager.py` - Sync logic with pause/resume methods
 
 ## Query Logging System
 

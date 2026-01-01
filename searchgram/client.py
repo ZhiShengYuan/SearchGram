@@ -18,6 +18,7 @@ from . import SearchEngine
 from .buffered_engine import BufferedSearchEngine
 from .config_loader import BOT_ID, SYNC_ENABLED, SYNC_CLEAR_COMPLETED, get_config
 from .init_client import get_client
+from .sync_ipc import SyncIPCReader
 from .sync_manager import SyncManager
 from .utils import setup_logger
 
@@ -43,6 +44,9 @@ r = fakeredis.FakeStrictRedis()
 
 # Initialize sync manager
 sync_manager = SyncManager(app, tgdb)
+
+# Initialize IPC reader for bot commands
+sync_ipc_reader = SyncIPCReader()
 
 # Statistics tracking
 stats = {
@@ -238,8 +242,85 @@ Sync checkpoint saved. You can resume anytime!
         logging.info("Keeping completed chats in checkpoint to prevent re-sync on restart (SYNC_CLEAR_COMPLETED=False)")
 
 
+def ipc_command_handler():
+    """
+    Monitor and handle IPC commands from bot process.
+    Runs in a background thread.
+    """
+    logging.info("IPC command handler started")
+
+    while True:
+        try:
+            # Check for new commands every 2 seconds
+            time.sleep(2)
+
+            # Read commands from IPC
+            commands = sync_ipc_reader.read_commands()
+
+            if not commands:
+                # Update status for bot to read
+                sync_ipc_reader.write_status(sync_manager.progress_map)
+                continue
+
+            # Process each command
+            for cmd in commands:
+                action = cmd.action
+                chat_id = cmd.chat_id
+
+                logging.info(f"Processing IPC command: {action} for chat {chat_id} (ID: {cmd.command_id})")
+
+                if action == "add":
+                    # Add chat to sync queue
+                    if sync_manager.add_chat(chat_id):
+                        logging.info(f"Added chat {chat_id} to sync queue via IPC")
+                        # Trigger sync for this chat in a separate thread
+                        threading.Thread(
+                            target=sync_manager.sync_chat,
+                            args=(chat_id,),
+                            daemon=True
+                        ).start()
+                    else:
+                        logging.warning(f"Chat {chat_id} already in sync queue")
+
+                elif action == "pause":
+                    # Pause sync task
+                    if sync_manager.pause_chat(chat_id):
+                        logging.info(f"Paused sync for chat {chat_id} via IPC")
+                    else:
+                        logging.warning(f"Failed to pause chat {chat_id} (not found or invalid state)")
+
+                elif action == "resume":
+                    # Resume sync task
+                    if sync_manager.resume_chat(chat_id):
+                        logging.info(f"Resumed sync for chat {chat_id} via IPC")
+                        # Trigger sync for this chat in a separate thread
+                        threading.Thread(
+                            target=sync_manager.sync_chat,
+                            args=(chat_id,),
+                            daemon=True
+                        ).start()
+                    else:
+                        logging.warning(f"Failed to resume chat {chat_id} (not found or invalid state)")
+
+                else:
+                    logging.warning(f"Unknown IPC command action: {action}")
+
+            # Clear processed commands
+            sync_ipc_reader.clear_commands()
+
+            # Update status for bot to read
+            sync_ipc_reader.write_status(sync_manager.progress_map)
+
+        except Exception as e:
+            logging.error(f"Error in IPC command handler: {e}", exc_info=True)
+            # Continue running despite errors
+
+
 if __name__ == "__main__":
-    # Start sync in background thread
+    # Start IPC command handler in background thread
+    threading.Thread(target=ipc_command_handler, daemon=True).start()
+
+    # Start sync in background thread (for config-based sync)
     threading.Thread(target=sync_history_new, daemon=True).start()
 
     try:
