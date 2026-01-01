@@ -307,6 +307,24 @@ func (h *APIHandler) Dedup(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// CleanCommands handles cleaning command messages (starting with '/')
+// DELETE /api/v1/commands
+func (h *APIHandler) CleanCommands(c *gin.Context) {
+	log.Info("Starting command cleanup...")
+
+	result, err := h.engine.CleanCommands()
+	if err != nil {
+		log.WithError(err).Error("Command cleanup failed")
+		c.JSON(http.StatusInternalServerError, models.ErrorResponse{
+			Error:   "Internal Server Error",
+			Message: "Command cleanup failed",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
 // Status handles health/status checks (new standardized endpoint)
 // GET /api/v1/status
 func (h *APIHandler) Status(c *gin.Context) {

@@ -146,3 +146,10 @@ type UserStatsResponse struct {
 	MentionsOut       int64   `json:"mentions_out"`        // User mentioned others (outgoing)
 	MentionsIn        int64   `json:"mentions_in"`         // User was mentioned (incoming)
 }
+
+// CleanCommandsResponse represents the result of a clean commands operation
+type CleanCommandsResponse struct {
+	Success      bool   `json:"success"`
+	DeletedCount int64  `json:"deleted_count"`
+	Message      string `json:"message,omitempty"`
+}

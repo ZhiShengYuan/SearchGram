@@ -142,6 +142,7 @@ def help_handler(client: "Client", message: "types.Message"):
 {f'''**🛠️ Admin Commands (Owner Only):**
 - `/ping` - Comprehensive health check (engine, messages, privacy, logs, config)
 - `/dedup` - Remove duplicate messages from database
+- `/clean_commands` - Remove all command messages (starting with /) from database
 - `/delete` - Delete messages from specific chat
 - `/logs [limit]` - View recent query logs
 - `/logstats` - View query statistics
@@ -203,6 +204,87 @@ def ping_handler(client: "Client", message: "types.Message"):
     text += f"\n  • Admins: {len(access_controller.admins)}"
 
     client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+
+
+@app.on_message(filters.command(["clean_commands"]))
+@require_owner
+def clean_commands_handler(client: "Client", message: "types.Message"):
+    """Remove all indexed command messages (starting with /) from database (owner only)."""
+    import time
+    import threading
+
+    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    # Send initial message
+    status_msg = client.send_message(
+        message.chat.id,
+        "🧹 **Starting command cleanup...**\n\n"
+        "Removing all messages starting with `/` from the database.\n\n"
+        "_Please wait..._",
+        parse_mode=enums.ParseMode.MARKDOWN
+    )
+
+    try:
+        # Check if the engine supports clean_commands
+        if not hasattr(tgdb, 'clean_commands'):
+            status_msg.edit_text(
+                "❌ **Command Cleanup Not Supported**\n\n"
+                "Your current search engine doesn't support command cleanup.\n"
+                "Please use `ENGINE=http` (Go search service) for this feature.",
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+            return
+
+        # Track operation start time
+        start_time = time.time()
+        cleanup_done = threading.Event()
+        cleanup_result = {}
+        cleanup_error = None
+
+        # Run cleanup in background thread
+        def run_cleanup():
+            nonlocal cleanup_result, cleanup_error
+            try:
+                cleanup_result = tgdb.clean_commands()
+            except Exception as e:
+                cleanup_error = e
+            finally:
+                cleanup_done.set()
+
+        # Start cleanup in background
+        cleanup_thread = threading.Thread(target=run_cleanup, daemon=True)
+        cleanup_thread.start()
+
+        # Wait for completion
+        cleanup_done.wait()
+
+        # Check for errors
+        if cleanup_error:
+            raise cleanup_error
+
+        # Format final response
+        deleted_count = cleanup_result.get('deleted_count', 0)
+        elapsed = int(time.time() - start_time)
+
+        if deleted_count == 0:
+            response_text = f"✅ **Command Cleanup Complete**\n\n" \
+                          f"⏱️ Completed in {elapsed}s\n\n" \
+                          f"No command messages found. Your database is clean! 🎉"
+        else:
+            response_text = f"✅ **Command Cleanup Complete**\n\n" \
+                          f"⏱️ Completed in {elapsed}s\n" \
+                          f"🗑️ Removed: {deleted_count:,} command messages\n\n" \
+                          f"All messages starting with `/` have been removed! 🎉"
+
+        status_msg.edit_text(response_text, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        error_text = f"❌ **Command Cleanup Failed**\n\n" \
+                   f"Error: {str(e)}\n\n" \
+                   f"💡 Tip: Check your server logs for more details.\n" \
+                   f"Make sure your Go search service and Elasticsearch are running."
+        status_msg.edit_text(error_text, parse_mode=enums.ParseMode.MARKDOWN)
+        logging.exception("Command cleanup failed")
 
 
 @app.on_message(filters.command(["dedup"]))
@@ -744,7 +826,7 @@ async def type_search_handler(client: "Client", message: "types.Message"):
         asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
-@app.on_message(filters.text & filters.incoming)
+@app.on_message(filters.text & filters.incoming & ~filters.command())
 @require_access
 async def search_handler(client: "Client", message: "types.Message"):
     await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)

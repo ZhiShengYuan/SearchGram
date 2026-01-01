@@ -140,6 +140,7 @@ func main() {
 
 		// Maintenance operations
 		v1.POST("/dedup", apiHandler.Dedup)
+		v1.DELETE("/commands", apiHandler.CleanCommands)
 
 		// Health and stats
 		v1.GET("/ping", apiHandler.Ping)

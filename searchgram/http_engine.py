@@ -496,6 +496,28 @@ class HTTPSearchEngine(BasicSearchEngine):
 
         return result
 
+    def clean_commands(self) -> Dict[str, Any]:
+        """
+        Remove all messages starting with '/' (bot commands).
+
+        This is useful to clean up the database from accidentally indexed
+        commands before the client-side filtering was implemented.
+
+        Returns:
+            Dictionary with cleanup results:
+            - success: bool
+            - deleted_count: int
+            - message: str
+        """
+        logging.info("Starting command cleanup...")
+
+        result = self._make_request("DELETE", "/api/v1/commands")
+
+        deleted_count = result.get("deleted_count", 0)
+        logging.info(f"Command cleanup complete: {deleted_count} messages removed")
+
+        return result
+
 
 # Factory function for compatibility
 def SearchEngine(*args, **kwargs) -> HTTPSearchEngine:

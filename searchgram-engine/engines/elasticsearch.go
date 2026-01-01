@@ -829,6 +829,53 @@ func (e *ElasticsearchEngine) GetUserStats(req *models.UserStatsRequest) (*model
 	return response, nil
 }
 
+// CleanCommands removes all messages starting with '/' (bot commands)
+func (e *ElasticsearchEngine) CleanCommands() (*models.CleanCommandsResponse, error) {
+	ctx := context.Background()
+
+	log.Info("Starting command cleanup: removing messages starting with '/'")
+
+	// First, count how many commands exist
+	prefixQuery := elastic.NewPrefixQuery("text.keyword", "/")
+	countResult, err := e.client.Count(e.index).Query(prefixQuery).Do(ctx)
+	if err != nil {
+		log.WithError(err).Error("Failed to count command messages")
+		return nil, fmt.Errorf("failed to count command messages: %w", err)
+	}
+
+	if countResult == 0 {
+		log.Info("No command messages found to clean")
+		return &models.CleanCommandsResponse{
+			Success:      true,
+			DeletedCount: 0,
+			Message:      "No command messages found",
+		}, nil
+	}
+
+	log.WithField("count", countResult).Info("Found command messages to delete")
+
+	// Delete all messages starting with '/'
+	deleteResult, err := e.client.DeleteByQuery(e.index).
+		Query(prefixQuery).
+		Refresh("true").
+		Do(ctx)
+	if err != nil {
+		log.WithError(err).Error("Failed to delete command messages")
+		return nil, fmt.Errorf("failed to delete command messages: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"deleted": deleteResult.Deleted,
+		"total":   countResult,
+	}).Info("Command cleanup completed")
+
+	return &models.CleanCommandsResponse{
+		Success:      true,
+		DeletedCount: deleteResult.Deleted,
+		Message:      fmt.Sprintf("Successfully removed %d command messages", deleteResult.Deleted),
+	}, nil
+}
+
 // Close closes the connection to Elasticsearch
 func (e *ElasticsearchEngine) Close() error {
 	e.client.Stop()

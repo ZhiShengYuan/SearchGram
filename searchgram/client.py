@@ -68,6 +68,12 @@ def message_handler(client: "Client", message: "types.Message"):
         logging.debug("Skipping service message: %s-%s", message.chat.id, message.id)
         return
 
+    # Skip bot commands (messages starting with /)
+    message_text = message.text or message.caption or ""
+    if message_text.startswith("/"):
+        logging.debug("Skipping command message: %s-%s (text: %s)", message.chat.id, message.id, message_text[:50])
+        return
+
     logging.info("Adding new message: %s-%s", message.chat.id, message.id)
     tgdb.upsert(message)
     stats["indexed"] += 1
@@ -93,6 +99,12 @@ def message_edit_handler(client: "Client", message: "types.Message"):
     # Skip service messages (no from_user)
     if not message.from_user:
         logging.debug("Skipping edited service message: %s-%s", message.chat.id, message.id)
+        return
+
+    # Skip bot commands (messages starting with /)
+    message_text = message.text or message.caption or ""
+    if message_text.startswith("/"):
+        logging.debug("Skipping edited command message: %s-%s (text: %s)", message.chat.id, message.id, message_text[:50])
         return
 
     logging.info("Editing old message: %s-%s", message.chat.id, message.id)

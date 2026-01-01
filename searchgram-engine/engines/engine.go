@@ -37,6 +37,9 @@ type SearchEngine interface {
 	// SoftDeleteMessage marks a single message as deleted
 	SoftDeleteMessage(chatID int64, messageID int64) error
 
+	// CleanCommands removes all messages starting with '/' (bot commands)
+	CleanCommands() (*models.CleanCommandsResponse, error)
+
 	// Close closes the connection to the search engine
 	Close() error
 }
