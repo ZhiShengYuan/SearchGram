@@ -107,15 +107,32 @@ def cancel_message_deletion(chat_id: int, message_id: int):
         logging.debug(f"Cancelled auto-deletion for message {message_id} in chat {chat_id}")
 
 
+async def auto_delete_in_groups(client: Client, message: types.Message, sent_msg: types.Message, has_markup: bool = False):
+    """
+    Schedule auto-deletion for bot messages in group/supergroup chats.
+
+    Args:
+        client: Pyrogram Client instance
+        message: Original message that triggered the bot
+        sent_msg: Bot's response message to be deleted
+        has_markup: Whether the message has inline keyboard (for pagination)
+    """
+    # Only auto-delete in groups and supergroups
+    if sent_msg.chat.type in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
+        await schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id)
+        logging.debug(f"Scheduled auto-deletion for message {sent_msg.id} in group {sent_msg.chat.id}")
+
+
 @app.on_message(filters.command(["start"]))
-def search_handler(client: "Client", message: "types.Message"):
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
-    message.reply_text("Hello, I'm search bot.", quote=True)
+async def search_handler(client: "Client", message: "types.Message"):
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+    sent_msg = await message.reply_text("Hello, I'm search bot.", quote=True)
+    await auto_delete_in_groups(client, message, sent_msg)
 
 
 @app.on_message(filters.command(["help"]))
-def help_handler(client: "Client", message: "types.Message"):
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+async def help_handler(client: "Client", message: "types.Message"):
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     # Get requester info for personalization
     user = message.from_user
@@ -164,13 +181,14 @@ def help_handler(client: "Client", message: "types.Message"):
 **📖 Privacy Notice:**
 This bot indexes messages for search. Use `/block_me` anytime to remove yourself from search results. Your privacy matters! 🛡️
     """
-    message.reply_text(help_text, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    sent_msg = await message.reply_text(help_text, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    await auto_delete_in_groups(client, message, sent_msg)
 
 
 @app.on_message(filters.command(["ping"]))
 @require_owner
-def ping_handler(client: "Client", message: "types.Message"):
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+async def ping_handler(client: "Client", message: "types.Message"):
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     # Get search engine stats
     ping_result = tgdb.ping()
@@ -212,7 +230,8 @@ def ping_handler(client: "Client", message: "types.Message"):
     text += f"\n  • Allowed Users: {len(access_controller.allowed_users)}"
     text += f"\n  • Admins: {len(access_controller.admins)}"
 
-    client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+    sent_msg = await client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+    await auto_delete_in_groups(client, message, sent_msg)
 
 
 @app.on_message(filters.command(["clean_commands"]))
@@ -400,20 +419,22 @@ def dedup_handler(client: "Client", message: "types.Message"):
 
 @app.on_message(filters.command(["delete"]))
 @require_owner
-def clean_handler(client: "Client", message: "types.Message"):
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+async def clean_handler(client: "Client", message: "types.Message"):
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
     text = tgdb.ping()
-    client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+    sent_msg = await client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+    await auto_delete_in_groups(client, message, sent_msg)
 
 
 @app.on_message(filters.command(["block_me", "optout", "privacy_block"]))
-def block_me_handler(client: "Client", message: "types.Message"):
+async def block_me_handler(client: "Client", message: "types.Message"):
     """Allow users to opt-out of search results."""
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     user = message.from_user
     if not user:
-        message.reply_text("❌ Could not identify your user ID.", quote=True)
+        sent_msg = await message.reply_text("❌ Could not identify your user ID.", quote=True)
+        await auto_delete_in_groups(client, message, sent_msg)
         return
 
     user_id = user.id
@@ -437,17 +458,19 @@ Your privacy is important! 🛡️
     else:
         response = "✅ You were already blocked from search results. You're all set! 🛡️"
 
-    message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    sent_msg = await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    await auto_delete_in_groups(client, message, sent_msg)
 
 
 @app.on_message(filters.command(["unblock_me", "optin", "privacy_unblock"]))
-def unblock_me_handler(client: "Client", message: "types.Message"):
+async def unblock_me_handler(client: "Client", message: "types.Message"):
     """Allow users to opt back into search results."""
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     user = message.from_user
     if not user:
-        message.reply_text("❌ Could not identify your user ID.", quote=True)
+        sent_msg = await message.reply_text("❌ Could not identify your user ID.", quote=True)
+        await auto_delete_in_groups(client, message, sent_msg)
         return
 
     user_id = user.id
@@ -468,17 +491,19 @@ Your messages will now appear in search results again.
     else:
         response = "✅ You weren't blocked. Your messages are already searchable."
 
-    message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    sent_msg = await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    await auto_delete_in_groups(client, message, sent_msg)
 
 
 @app.on_message(filters.command(["privacy_status", "privacy", "mystatus"]))
-def privacy_status_handler(client: "Client", message: "types.Message"):
+async def privacy_status_handler(client: "Client", message: "types.Message"):
     """Check user's current privacy status."""
-    client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     user = message.from_user
     if not user:
-        message.reply_text("❌ Could not identify your user ID.", quote=True)
+        sent_msg = await message.reply_text("❌ Could not identify your user ID.", quote=True)
+        await auto_delete_in_groups(client, message, sent_msg)
         return
 
     user_id = user.id
@@ -499,7 +524,8 @@ def privacy_status_handler(client: "Client", message: "types.Message"):
 - {"/unblock_me - Allow search" if is_blocked else "/block_me - Block from search"}
     """
 
-    message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    sent_msg = await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+    await auto_delete_in_groups(client, message, sent_msg)
 
 
 def get_display_name(chat: dict):
@@ -936,29 +962,20 @@ async def mystats_handler(client: "Client", message: "types.Message"):
     user = message.from_user
     sender_chat = message.sender_chat
 
-    # If sent from a channel (sender_chat) instead of a user, explain the limitation
-    if not user and sender_chat:
-        await message.reply_text(
-            "❌ **Channel Messages Not Supported**\n\n"
-            "This command doesn't work for messages sent from channels or when you post anonymously as a channel admin.\n\n"
-            "💡 **Tip**: Send this command as yourself (not as the channel) to see your stats.",
-            quote=True,
-            parse_mode=enums.ParseMode.MARKDOWN
-        )
-        return
-
-    # If neither user nor sender_chat, something is wrong
-    if not user:
-        await message.reply_text("❌ Could not identify your user ID.", quote=True)
+    # Support both users and channels
+    if not user and not sender_chat:
+        sent_msg = await message.reply_text("❌ Could not identify sender.", quote=True)
+        await auto_delete_in_groups(client, message, sent_msg)
         return
 
     # Only work in group chats
     if message.chat.type not in [enums.ChatType.GROUP, enums.ChatType.SUPERGROUP]:
-        await message.reply_text(
+        sent_msg = await message.reply_text(
             "❌ This command only works in group chats.\n\n"
             "Use it in a group to see your activity stats!",
             quote=True
         )
+        await auto_delete_in_groups(client, message, sent_msg)
         return
 
     # Parse command arguments
@@ -981,7 +998,7 @@ async def mystats_handler(client: "Client", message: "types.Message"):
     try:
         from_ts, to_ts = parse_time_window(time_window)
     except ValueError as e:
-        await message.reply_text(
+        sent_msg = await message.reply_text(
             f"❌ Invalid time window: {e}\n\n"
             "**Supported formats:**\n"
             "- `7d`, `30d`, `90d`, `365d`, `1y`\n"
@@ -994,16 +1011,22 @@ async def mystats_handler(client: "Client", message: "types.Message"):
             quote=True,
             parse_mode=enums.ParseMode.MARKDOWN
         )
+        await auto_delete_in_groups(client, message, sent_msg)
         return
+
+    # Determine sender ID - use channel ID if sent from channel, otherwise user ID
+    sender_id = sender_chat.id if sender_chat else user.id
+    sender_name = sender_chat.title if sender_chat else (user.first_name or user.username or "You")
+    is_channel = sender_chat is not None
 
     # Get stats from backend
     try:
         stats = tgdb.get_user_stats(
             group_id=message.chat.id,
-            user_id=user.id,
+            user_id=sender_id,
             from_timestamp=from_ts,
             to_timestamp=to_ts,
-            include_mentions=include_mentions,
+            include_mentions=include_mentions and not is_channel,  # No mention stats for channels
             include_deleted=False  # Regular users never see deleted
         )
 
@@ -1013,33 +1036,40 @@ async def mystats_handler(client: "Client", message: "types.Message"):
         ratio = stats["user_ratio"]
         time_desc = format_time_window(from_ts, to_ts)
 
-        response = f"📊 **Your Activity Stats**\n\n"
+        entity_type = "Channel" if is_channel else "Your"
+        response = f"📊 **{entity_type} Activity Stats**\n\n"
+        if is_channel:
+            response += f"**Channel:** {sender_name}\n"
         response += f"**Group:** {message.chat.title or 'This Group'}\n"
         response += f"**Period:** {time_desc}\n\n"
 
         if group_total == 0:
             response += "No messages found in this time period."
         else:
-            response += f"**Your Messages:** {user_count:,}\n"
+            label = "Channel Messages" if is_channel else "Your Messages"
+            share_label = "Channel Share" if is_channel else "Your Share"
+            response += f"**{label}:** {user_count:,}\n"
             response += f"**Group Total:** {group_total:,}\n"
-            response += f"**Your Share:** {ratio:.1%}\n"
+            response += f"**{share_label}:** {ratio:.1%}\n"
 
-            if include_mentions:
+            if include_mentions and not is_channel:
                 mentions_out = stats.get("mentions_out", 0)
                 mentions_in = stats.get("mentions_in", 0)
                 response += f"\n**Mentions:**\n"
                 response += f"  • You mentioned others: {mentions_out:,} times\n"
                 response += f"  • Others mentioned you: {mentions_in:,} times\n"
 
-        await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+        sent_msg = await message.reply_text(response, quote=True, parse_mode=enums.ParseMode.MARKDOWN)
+        await auto_delete_in_groups(client, message, sent_msg)
 
     except Exception as e:
         logging.exception("Error getting user stats")
-        await message.reply_text(
+        sent_msg = await message.reply_text(
             f"❌ Error retrieving stats: {str(e)}\n\n"
             "Please try again or contact the bot owner.",
             quote=True
         )
+        await auto_delete_in_groups(client, message, sent_msg)
 
 
 @app.on_message(filters.command(["logs", "query_logs"]))
