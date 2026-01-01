@@ -18,6 +18,10 @@
     },
     "search": {
       "base_url": "http://127.0.0.1:8080"
+    },
+    "sync": {
+      "_comment": "Sync API server on client process for bot-controlled indexing",
+      "base_url": "http://127.0.0.1:5000"
     }
   },
   "auth": {
@@ -131,5 +135,11 @@
     "clear_completed": false,
     "_clear_completed_comment": "If false (recommended), keeps completed chats in checkpoint to prevent re-sync on restart. If true, removes them after sync completes.",
     "chats": []
+  },
+  "sync_api": {
+    "_comment": "HTTP API server settings for sync operations (runs on client process)",
+    "host": "127.0.0.1",
+    "port": 5000,
+    "_usage_comment": "Bot sends sync commands to this API. Ensure firewall allows bot server to connect if running on different machines."
   }
 }

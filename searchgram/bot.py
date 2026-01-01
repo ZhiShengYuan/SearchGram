@@ -19,11 +19,11 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from . import SearchEngine
 from .access_control import require_access, require_owner, access_controller
-from .config_loader import BOT_MODE, DATABASE_ENABLED, DATABASE_PATH, TOKEN
+from .config_loader import BOT_MODE, DATABASE_ENABLED, DATABASE_PATH, TOKEN, get_config
 from .db_manager import get_db_manager
 from .init_client import get_client
 from .privacy import privacy_manager
-from .sync_ipc import SyncIPCWriter
+from .sync_http_client import SyncHTTPClient
 from .time_utils import parse_time_window, format_time_window
 from .utils import setup_logger
 
@@ -32,8 +32,12 @@ tgdb = SearchEngine()
 setup_logger()
 app = get_client(TOKEN)
 
-# Initialize IPC writer for sync commands
-sync_ipc = SyncIPCWriter()
+# Get configuration
+config = get_config()
+
+# Initialize sync HTTP client
+sync_api_url = config.get("services.sync.base_url", "http://127.0.0.1:5000")
+sync_client = SyncHTTPClient(base_url=sync_api_url)
 
 # Custom filter to exclude all command messages (starting with /)
 def not_command_filter(_, __, message: types.Message):
@@ -1328,23 +1332,38 @@ async def sync_handler(client: "Client", message: "types.Message"):
             )
             return
 
-        # Send command to client process via IPC
+        # Send command to client via HTTP API
         user_id = message.from_user.id if message.from_user else 0
-        command_id = sync_ipc.send_command("add", chat_id=chat_id, requested_by=user_id)
+        result = sync_client.add_sync(chat_id, requested_by=user_id)
 
-        await message.reply_text(
-            f"✅ **Sync task submitted!**\n\n"
-            f"Chat ID: `{chat_id}`\n"
-            f"Command ID: `{command_id}`\n\n"
-            f"The client process will start syncing this chat shortly.\n"
-            f"Use `/sync_status` to monitor progress.",
-            quote=True,
-            parse_mode=enums.ParseMode.MARKDOWN
-        )
+        if result.get("success"):
+            await message.reply_text(
+                f"✅ **Sync task started!**\n\n"
+                f"Chat ID: `{chat_id}`\n\n"
+                f"{result.get('message', 'Syncing in progress...')}\n"
+                f"Use `/sync_status` to monitor progress.",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+        else:
+            await message.reply_text(
+                f"⚠️ **Sync task status:**\n\n"
+                f"Chat ID: `{chat_id}`\n"
+                f"Status: {result.get('status', 'unknown')}\n\n"
+                f"{result.get('message', 'Chat may already be in queue.')}",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
 
     except Exception as e:
         logging.exception("Error submitting sync task")
-        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+        await message.reply_text(
+            f"❌ **Error connecting to sync API:**\n\n"
+            f"`{str(e)}`\n\n"
+            f"Make sure the client process is running.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
 
 
 @app.on_message(filters.command(["sync_status"]))
@@ -1354,8 +1373,8 @@ async def sync_status_handler(client: "Client", message: "types.Message"):
     await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
 
     try:
-        # Read status from IPC
-        status = sync_ipc.get_status()
+        # Get status from HTTP API
+        status = sync_client.get_sync_status()
 
         if not status or not status.get("chats"):
             await message.reply_text(
@@ -1368,7 +1387,7 @@ async def sync_status_handler(client: "Client", message: "types.Message"):
 
         # Format status message
         response = "📊 **Sync Status**\n\n"
-        response += f"Last Updated: `{status.get('last_updated', 'Unknown')}`\n\n"
+        response += f"Last Updated: `{status.get('timestamp', 'Unknown')}`\n\n"
 
         chats = status.get("chats", [])
         for chat_data in chats:
@@ -1420,7 +1439,13 @@ async def sync_status_handler(client: "Client", message: "types.Message"):
 
     except Exception as e:
         logging.exception("Error getting sync status")
-        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+        await message.reply_text(
+            f"❌ **Error connecting to sync API:**\n\n"
+            f"`{str(e)}`\n\n"
+            f"Make sure the client process is running.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
 
 
 @app.on_message(filters.command(["sync_pause"]))
@@ -1451,23 +1476,36 @@ async def sync_pause_handler(client: "Client", message: "types.Message"):
             )
             return
 
-        # Send pause command to client
-        user_id = message.from_user.id if message.from_user else 0
-        command_id = sync_ipc.send_command("pause", chat_id=chat_id, requested_by=user_id)
+        # Send pause command via HTTP API
+        result = sync_client.pause_sync(chat_id)
 
-        await message.reply_text(
-            f"⏸️ **Pause command sent!**\n\n"
-            f"Chat ID: `{chat_id}`\n"
-            f"Command ID: `{command_id}`\n\n"
-            f"The sync will pause at the next checkpoint.\n"
-            f"Use `/sync_resume {chat_id}` to continue.",
-            quote=True,
-            parse_mode=enums.ParseMode.MARKDOWN
-        )
+        if result.get("success"):
+            await message.reply_text(
+                f"⏸️ **Sync paused!**\n\n"
+                f"Chat ID: `{chat_id}`\n\n"
+                f"{result.get('message', 'Sync paused at next checkpoint.')}\n"
+                f"Use `/sync_resume {chat_id}` to continue.",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+        else:
+            await message.reply_text(
+                f"❌ **Failed to pause sync:**\n\n"
+                f"Chat ID: `{chat_id}`\n\n"
+                f"{result.get('message', 'Unknown error')}",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
 
     except Exception as e:
         logging.exception("Error pausing sync")
-        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+        await message.reply_text(
+            f"❌ **Error connecting to sync API:**\n\n"
+            f"`{str(e)}`\n\n"
+            f"Make sure the client process is running.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
 
 
 @app.on_message(filters.command(["sync_resume"]))
@@ -1498,23 +1536,36 @@ async def sync_resume_handler(client: "Client", message: "types.Message"):
             )
             return
 
-        # Send resume command to client
-        user_id = message.from_user.id if message.from_user else 0
-        command_id = sync_ipc.send_command("resume", chat_id=chat_id, requested_by=user_id)
+        # Send resume command via HTTP API
+        result = sync_client.resume_sync(chat_id)
 
-        await message.reply_text(
-            f"▶️ **Resume command sent!**\n\n"
-            f"Chat ID: `{chat_id}`\n"
-            f"Command ID: `{command_id}`\n\n"
-            f"The sync will resume from the last checkpoint.\n"
-            f"Use `/sync_status` to monitor progress.",
-            quote=True,
-            parse_mode=enums.ParseMode.MARKDOWN
-        )
+        if result.get("success"):
+            await message.reply_text(
+                f"▶️ **Sync resumed!**\n\n"
+                f"Chat ID: `{chat_id}`\n\n"
+                f"{result.get('message', 'Sync resumed from last checkpoint.')}\n"
+                f"Use `/sync_status` to monitor progress.",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
+        else:
+            await message.reply_text(
+                f"❌ **Failed to resume sync:**\n\n"
+                f"Chat ID: `{chat_id}`\n\n"
+                f"{result.get('message', 'Unknown error')}",
+                quote=True,
+                parse_mode=enums.ParseMode.MARKDOWN
+            )
 
     except Exception as e:
         logging.exception("Error resuming sync")
-        await message.reply_text(f"❌ Error: {str(e)}", quote=True)
+        await message.reply_text(
+            f"❌ **Error connecting to sync API:**\n\n"
+            f"`{str(e)}`\n\n"
+            f"Make sure the client process is running.",
+            quote=True,
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
 
 
 @app.on_message(filters.command(["sync_list"]))

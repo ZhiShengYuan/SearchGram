@@ -313,27 +313,28 @@ The bot will show:
 
 **Note:** The upsert operations are designed to be idempotent (using document IDs), so duplicates should be rare. However, this command provides a way to manually clean up the database if needed.
 
-## Bot-Controlled Sync System (IPC)
+## Bot-Controlled Sync System (HTTP API)
 
-SearchGram supports **on-demand chat synchronization** via bot commands using an IPC (Inter-Process Communication) mechanism. This allows the bot owner to trigger indexing tasks from the bot interface without modifying `config.json`.
+SearchGram supports **on-demand chat synchronization** via bot commands using an HTTP API. This allows the bot owner to trigger indexing tasks from the bot interface without modifying `config.json`.
 
 ### Architecture
 
-**IPC Files:**
-- `sync_commands.json` - Bot writes commands, client reads and processes
-- `sync_status.json` - Client writes status, bot reads for monitoring
+**HTTP API Server:**
+- Runs on client process (default: `http://127.0.0.1:5000`)
+- RESTful API with Flask
+- Supports cross-server deployment (bot and client on different machines)
 
 **Components:**
-1. **Bot Side** (`sync_ipc.SyncIPCWriter`):
-   - Sends commands to client process via JSON file
-   - Reads sync status from client
-   - Provides real-time progress updates to user
+1. **Bot Side** (`sync_http_client.SyncHTTPClient`):
+   - Sends HTTP requests to client's sync API
+   - Retrieves real-time sync status
+   - Handles connection errors gracefully
 
-2. **Client Side** (`sync_ipc.SyncIPCReader`):
-   - Monitors commands file every 2 seconds
-   - Processes commands (add, pause, resume)
-   - Updates status file with progress
+2. **Client Side** (`sync_api.py`):
+   - Flask HTTP server running in background thread
+   - Processes REST API calls (POST /api/v1/sync, GET /api/v1/sync/status, etc.)
    - Integrates with `SyncManager` for actual syncing
+   - Thread-safe operations
 
 ### Bot Commands
 
@@ -378,26 +379,28 @@ Alias for `/sync_status`.
 ### How It Works
 
 1. **Bot receives command** (e.g., `/sync -1001234567890`)
-2. **Bot writes to `sync_commands.json`**:
-   ```json
+2. **Bot sends HTTP POST to client**:
+   ```http
+   POST http://client-server:5000/api/v1/sync
+   Content-Type: application/json
+
    {
-     "commands": [{
-       "command_id": "add_-1001234567890_1735689600000",
-       "action": "add",
-       "chat_id": -1001234567890,
-       "requested_by": 123456789,
-       "timestamp": "2026-01-01T00:00:00"
-     }]
+     "chat_id": -1001234567890,
+     "requested_by": 123456789
    }
    ```
-3. **Client IPC handler** (runs every 2s):
-   - Reads commands from file
+3. **Client API handler**:
+   - Receives HTTP request
    - Calls `sync_manager.add_chat(chat_id)`
-   - Starts sync thread
-   - Clears commands file
-4. **Client updates status** to `sync_status.json`:
-   ```json
+   - Starts sync in background thread
+   - Returns JSON response
+4. **Client provides real-time status** via GET endpoint:
+   ```http
+   GET http://client-server:5000/api/v1/sync/status
+
+   Response:
    {
+     "timestamp": "2026-01-01T00:00:00",
      "chats": [{
        "chat_id": -1001234567890,
        "status": "in_progress",
@@ -408,7 +411,7 @@ Alias for `/sync_status`.
      }]
    }
    ```
-5. **Bot reads status** when user runs `/sync_status`
+5. **Bot queries status** when user runs `/sync_status`
 
 ### Features
 
@@ -423,9 +426,9 @@ Alias for `/sync_status`.
 - Detailed error logging in status file
 
 **Thread Safety:**
-- Atomic file writes (temp file + rename)
+- HTTP requests processed in Flask threads
 - Lock-based synchronization in SyncManager
-- Status updates don't block sync operations
+- Status queries don't block sync operations
 
 **Batch Processing:**
 - Configurable batch size (default: 100 messages)
@@ -434,11 +437,35 @@ Alias for `/sync_status`.
 
 ### Configuration
 
-No additional configuration needed. The system uses existing sync settings:
+**Sync API Server (client process):**
+- `sync_api.host`: API server host (default: `127.0.0.1`)
+- `sync_api.port`: API server port (default: `5000`)
+
+**Sync API Client (bot process):**
+- `services.sync.base_url`: Sync API endpoint (default: `http://127.0.0.1:5000`)
+
+**Sync Settings (shared):**
 - `SYNC_BATCH_SIZE`: Messages per batch
 - `SYNC_RETRY_ON_ERROR`: Enable retry logic
 - `SYNC_MAX_RETRIES`: Max retry attempts
 - `SYNC_DELAY_BETWEEN_BATCHES`: Delay in seconds
+
+**Cross-Server Setup:**
+If bot and client run on different machines, configure:
+```json
+{
+  "services": {
+    "sync": {
+      "base_url": "http://client-server-ip:5000"
+    }
+  },
+  "sync_api": {
+    "host": "0.0.0.0",
+    "port": 5000
+  }
+}
+```
+Ensure firewall allows connection from bot server to client server port 5000.
 
 ### Use Cases
 
@@ -461,10 +488,19 @@ No additional configuration needed. The system uses existing sync settings:
 
 ### Implementation Files
 
-- `searchgram/sync_ipc.py` - IPC classes (SyncCommand, SyncIPCWriter, SyncIPCReader)
+- `searchgram/sync_api.py` - Flask HTTP API server (runs on client)
+- `searchgram/sync_http_client.py` - HTTP client for bot to call sync API
 - `searchgram/bot.py` - Bot command handlers (/sync, /sync_status, etc.)
-- `searchgram/client.py` - IPC handler thread (ipc_command_handler)
+- `searchgram/client.py` - Starts sync API server in background thread
 - `searchgram/sync_manager.py` - Sync logic with pause/resume methods
+
+### API Endpoints
+
+**POST /api/v1/sync** - Add chat to sync queue
+**GET /api/v1/sync/status?chat_id=<id>** - Get sync status (all or specific chat)
+**POST /api/v1/sync/pause** - Pause sync task
+**POST /api/v1/sync/resume** - Resume paused sync
+**GET /health** - Health check
 
 ## Query Logging System
 
