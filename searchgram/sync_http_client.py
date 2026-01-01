@@ -62,8 +62,14 @@ class SyncHTTPClient:
             try:
                 token = self.jwt_auth.generate_token()
                 headers["Authorization"] = f"Bearer {token}"
+                logging.debug(f"Generated JWT token for sync API request")
             except Exception as e:
-                logging.warning(f"Failed to generate JWT token: {e}")
+                logging.error(f"Failed to generate JWT token for sync API: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+        else:
+            logging.warning(f"No JWT auth configured - sync API request will likely fail with 401")
 
         return headers
 
