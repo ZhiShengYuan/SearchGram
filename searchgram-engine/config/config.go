@@ -230,8 +230,9 @@ func (c *Config) Validate() error {
 		if c.Auth.Audience == "" {
 			return fmt.Errorf("JWT audience is required when JWT auth is enabled")
 		}
-		if c.Auth.PublicKeyPath == "" {
-			return fmt.Errorf("JWT public key path is required when JWT auth is enabled")
+		// Either path-based OR inline keys are acceptable
+		if c.Auth.PublicKeyPath == "" && c.Auth.PublicKeyInline == nil {
+			return fmt.Errorf("JWT public key (path or inline) is required when JWT auth is enabled")
 		}
 	}
 
