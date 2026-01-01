@@ -8,6 +8,7 @@ Fixed the Go search service to exclude `/health` and `/` endpoints from JWT auth
 - `cbadfe3` - Fix JWT config validation to accept inline keys
 - `6dec7c2` - Remove emoji from startup messages for systemd compatibility
 - `ca4047f` - Fix search service authentication and configuration
+- `ec3ea15` - Add PyJWT and cryptography dependencies for JWT authentication
 
 ## Deployment Steps (On Remote Server)
 
@@ -20,12 +21,32 @@ git pull origin master
 
 You should see these commits:
 ```
+ec3ea15 Add PyJWT and cryptography dependencies for JWT authentication
 ca4047f Fix search service authentication and configuration
 6dec7c2 Remove emoji from startup messages for systemd compatibility
 cbadfe3 Fix JWT config validation to accept inline keys
 ```
 
-### 2. Rebuild Go Service
+### 2. Install Python Dependencies
+
+The Python services need PyJWT for JWT authentication:
+
+```bash
+# Activate your Python virtual environment if using one
+source venv/bin/activate  # or wherever your venv is
+
+# Install new dependencies
+pip install -r requirements.txt
+```
+
+**Important:** If you see an error like `module 'jwt' has no attribute 'encode'`, you may need to uninstall the wrong `jwt` package:
+
+```bash
+pip uninstall jwt -y
+pip install PyJWT==2.10.1 cryptography==44.0.0
+```
+
+### 3. Rebuild Go Service
 
 ```bash
 cd searchgram-engine
@@ -37,7 +58,7 @@ Or if you have a Makefile:
 make build
 ```
 
-### 3. Restart Services
+### 4. Restart Services
 
 ```bash
 # Restart Go search service
@@ -50,7 +71,7 @@ sudo systemctl restart searchgram-bot.service
 sudo systemctl restart searchgram-client.service
 ```
 
-### 4. Verify Deployment
+### 5. Verify Deployment
 
 Check that the health endpoint is now accessible without authentication:
 
@@ -63,7 +84,7 @@ sudo systemctl status searchgram-engine.service
 sudo systemctl status searchgram-bot.service
 ```
 
-### 5. Check Logs
+### 6. Check Logs
 
 ```bash
 # Search service logs
@@ -105,6 +126,29 @@ After deployment:
 - ✅ Services start without 401 errors
 
 ## Troubleshooting
+
+### JWT Authentication Errors
+
+If you see `AttributeError: module 'jwt' has no attribute 'encode'`:
+
+1. **Check which jwt package is installed:**
+   ```bash
+   pip list | grep -i jwt
+   ```
+
+2. **Uninstall wrong package and install correct one:**
+   ```bash
+   pip uninstall jwt -y
+   pip install PyJWT==2.10.1 cryptography==44.0.0
+   ```
+
+3. **Restart Python services:**
+   ```bash
+   sudo systemctl restart searchgram-bot.service
+   sudo systemctl restart searchgram-client.service
+   ```
+
+### 401 Unauthorized Errors
 
 If you still get 401 errors after deployment:
 
