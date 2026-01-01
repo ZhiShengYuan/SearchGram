@@ -577,18 +577,20 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
     # Filter results based on user group permissions
     # Owner and admins see all groups, regular users see only their allowed groups
     if user_id and not chat_id:  # Only apply if not already filtered to a specific chat
-        allowed_groups = access_controller.get_allowed_groups_for_user(user_id)
-        if allowed_groups:  # If user has specific group restrictions
-            # Filter hits to only include messages from allowed groups
-            original_hits = results.get("hits", [])
-            filtered_hits = [hit for hit in original_hits if hit.get("chat", {}).get("id") in allowed_groups]
-            results["hits"] = filtered_hits
-            # Update count to reflect filtered results
-            results["totalHits"] = len(filtered_hits)
-            # Recalculate pages based on filtered results
-            hits_per_page = results.get("hitsPerPage", 10)
-            results["totalPages"] = (len(filtered_hits) + hits_per_page - 1) // hits_per_page if hits_per_page > 0 else 1
-            logging.info(f"Filtered search results for user {user_id}: {len(original_hits)} -> {len(filtered_hits)} hits")
+        # Skip filtering for owner and admins - they can see all groups
+        if not access_controller.is_owner(user_id) and not access_controller.is_admin(user_id):
+            allowed_groups = access_controller.get_allowed_groups_for_user(user_id)
+            if allowed_groups:  # If user has specific group restrictions
+                # Filter hits to only include messages from allowed groups
+                original_hits = results.get("hits", [])
+                filtered_hits = [hit for hit in original_hits if hit.get("chat", {}).get("id") in allowed_groups]
+                results["hits"] = filtered_hits
+                # Update count to reflect filtered results
+                results["totalHits"] = len(filtered_hits)
+                # Recalculate pages based on filtered results
+                hits_per_page = results.get("hitsPerPage", 10)
+                results["totalPages"] = (len(filtered_hits) + hits_per_page - 1) // hits_per_page if hits_per_page > 0 else 1
+                logging.info(f"Filtered search results for user {user_id}: {len(original_hits)} -> {len(filtered_hits)} hits")
 
     text = parse_search_results(results)
     if not text:
