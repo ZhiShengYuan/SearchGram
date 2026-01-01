@@ -243,14 +243,14 @@ Sync checkpoint saved. You can resume anytime!
 
 
 if __name__ == "__main__":
-    # Get sync API configuration
-    sync_api_host = config.get("sync_api.host", "127.0.0.1")
-    sync_api_port = config.get_int("sync_api.port", 5000)
+    # Get userbot HTTP API configuration
+    userbot_host = config.get("http.listen", "127.0.0.1")
+    userbot_port = config.get_int("http.userbot_port", 8082)
 
-    # Start sync API server in background thread
+    # Start userbot HTTP API server in background thread
     threading.Thread(
         target=run_sync_api,
-        args=(sync_api_host, sync_api_port),
+        args=(userbot_host, userbot_port),
         daemon=True
     ).start()
 

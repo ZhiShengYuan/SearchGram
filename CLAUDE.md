@@ -315,24 +315,26 @@ The bot will show:
 
 ## Bot-Controlled Sync System (HTTP API)
 
-SearchGram supports **on-demand chat synchronization** via bot commands using an HTTP API. This allows the bot owner to trigger indexing tasks from the bot interface without modifying `config.json`.
+SearchGram supports **on-demand chat synchronization** via bot commands using the userbot HTTP API. This allows the bot owner to trigger indexing tasks from the bot interface without modifying `config.json`.
 
 ### Architecture
 
-**HTTP API Server:**
-- Runs on client process (default: `http://127.0.0.1:5000`)
+**Userbot HTTP API Server:**
+- Runs on client/userbot process (default: `http://127.0.0.1:8082`)
 - RESTful API with Flask
+- Part of the unified services architecture
 - Supports cross-server deployment (bot and client on different machines)
 
 **Components:**
 1. **Bot Side** (`sync_http_client.SyncHTTPClient`):
-   - Sends HTTP requests to client's sync API
+   - Sends HTTP requests to userbot's sync endpoints
+   - Uses `services.userbot.base_url` configuration
    - Retrieves real-time sync status
    - Handles connection errors gracefully
 
-2. **Client Side** (`sync_api.py`):
-   - Flask HTTP server running in background thread
-   - Processes REST API calls (POST /api/v1/sync, GET /api/v1/sync/status, etc.)
+2. **Client/Userbot Side** (`sync_api.py`):
+   - Flask HTTP server running in background thread on port 8082
+   - Exposes sync endpoints under `/api/v1/sync/*`
    - Integrates with `SyncManager` for actual syncing
    - Thread-safe operations
 
@@ -379,9 +381,9 @@ Alias for `/sync_status`.
 ### How It Works
 
 1. **Bot receives command** (e.g., `/sync -1001234567890`)
-2. **Bot sends HTTP POST to client**:
+2. **Bot sends HTTP POST to userbot service**:
    ```http
-   POST http://client-server:5000/api/v1/sync
+   POST http://userbot-server:8082/api/v1/sync
    Content-Type: application/json
 
    {
@@ -389,14 +391,14 @@ Alias for `/sync_status`.
      "requested_by": 123456789
    }
    ```
-3. **Client API handler**:
-   - Receives HTTP request
+3. **Userbot API handler**:
+   - Receives HTTP request on port 8082
    - Calls `sync_manager.add_chat(chat_id)`
    - Starts sync in background thread
    - Returns JSON response
-4. **Client provides real-time status** via GET endpoint:
+4. **Userbot provides real-time status** via GET endpoint:
    ```http
-   GET http://client-server:5000/api/v1/sync/status
+   GET http://userbot-server:8082/api/v1/sync/status
 
    Response:
    {
@@ -437,12 +439,12 @@ Alias for `/sync_status`.
 
 ### Configuration
 
-**Sync API Server (client process):**
-- `sync_api.host`: API server host (default: `127.0.0.1`)
-- `sync_api.port`: API server port (default: `5000`)
+**Userbot HTTP API (client/userbot process):**
+- `http.listen`: Listen address (default: `127.0.0.1`)
+- `http.userbot_port`: Userbot API port (default: `8082`)
 
-**Sync API Client (bot process):**
-- `services.sync.base_url`: Sync API endpoint (default: `http://127.0.0.1:5000`)
+**Bot Service (bot process):**
+- `services.userbot.base_url`: Userbot API endpoint (default: `http://127.0.0.1:8082`)
 
 **Sync Settings (shared):**
 - `SYNC_BATCH_SIZE`: Messages per batch
@@ -451,21 +453,29 @@ Alias for `/sync_status`.
 - `SYNC_DELAY_BETWEEN_BATCHES`: Delay in seconds
 
 **Cross-Server Setup:**
-If bot and client run on different machines, configure:
+If bot and client run on different machines (e.g., bot on `nomao-lax`, client on `ucre3`):
+
+**On bot server config:**
 ```json
 {
   "services": {
-    "sync": {
-      "base_url": "http://client-server-ip:5000"
+    "userbot": {
+      "base_url": "http://ucre3:8082"
     }
-  },
-  "sync_api": {
-    "host": "0.0.0.0",
-    "port": 5000
   }
 }
 ```
-Ensure firewall allows connection from bot server to client server port 5000.
+
+**On client/userbot server config:**
+```json
+{
+  "http": {
+    "listen": "0.0.0.0",
+    "userbot_port": 8082
+  }
+}
+```
+Ensure firewall allows connection from bot server to client server port 8082.
 
 ### Use Cases
 

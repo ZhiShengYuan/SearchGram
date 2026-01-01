@@ -35,9 +35,9 @@ app = get_client(TOKEN)
 # Get configuration
 config = get_config()
 
-# Initialize sync HTTP client
-sync_api_url = config.get("services.sync.base_url", "http://127.0.0.1:5000")
-sync_client = SyncHTTPClient(base_url=sync_api_url)
+# Initialize sync HTTP client (uses userbot service)
+userbot_url = config.get("services.userbot.base_url", "http://127.0.0.1:8082")
+sync_client = SyncHTTPClient(base_url=userbot_url)
 
 # Custom filter to exclude all command messages (starting with /)
 def not_command_filter(_, __, message: types.Message):
