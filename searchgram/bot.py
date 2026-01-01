@@ -31,6 +31,15 @@ tgdb = SearchEngine()
 setup_logger()
 app = get_client(TOKEN)
 
+# Custom filter to exclude all command messages (starting with /)
+def not_command_filter(_, __, message: types.Message):
+    """Filter out messages that start with / (commands)."""
+    if not message.text:
+        return True
+    return not message.text.startswith("/")
+
+not_command = filters.create(not_command_filter)
+
 # Initialize database manager for query logging
 db_manager = get_db_manager(DATABASE_PATH) if DATABASE_ENABLED else None
 chat_types = [i for i in dir(enums.ChatType) if not i.startswith("_")]
@@ -826,7 +835,7 @@ async def type_search_handler(client: "Client", message: "types.Message"):
         asyncio.create_task(schedule_message_deletion(client, sent_msg.chat.id, sent_msg.id))
 
 
-@app.on_message(filters.text & filters.incoming & ~filters.command())
+@app.on_message(filters.text & filters.incoming & not_command)
 @require_access
 async def search_handler(client: "Client", message: "types.Message"):
     await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
