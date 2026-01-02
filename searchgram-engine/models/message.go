@@ -28,16 +28,54 @@ type MessageEntity struct {
 
 // Message represents a Telegram message
 type Message struct {
-	ID        string          `json:"id"`          // Composite key: {chat_id}-{message_id}
-	MessageID int64           `json:"message_id"`  // Original message ID
-	Text      string          `json:"text"`        // Message text
-	Chat      Chat            `json:"chat"`        // Chat information
-	FromUser  User            `json:"from_user"`   // Sender information
-	Date      int64           `json:"date"`        // Unix timestamp
-	Timestamp int64           `json:"timestamp"`   // Unix timestamp (for sorting)
-	Entities  []MessageEntity `json:"entities,omitempty"` // Message entities (mentions, hashtags, etc.)
-	IsDeleted bool            `json:"is_deleted"`         // Soft-delete flag
-	DeletedAt int64           `json:"deleted_at,omitempty"` // Deletion timestamp
+	// Core identifiers
+	ID        string `json:"id"`         // Composite key: {chat_id}-{message_id}
+	MessageID int64  `json:"message_id"` // Original message ID
+	ChatID    int64  `json:"chat_id"`    // Chat ID (for filtering)
+	Timestamp int64  `json:"timestamp"`  // Unix timestamp (for sorting)
+	Date      int64  `json:"date"`       // Unix timestamp (backward compat)
+
+	// Chat information (searchable)
+	ChatType     string `json:"chat_type"`               // PRIVATE, GROUP, SUPERGROUP, CHANNEL, BOT
+	ChatTitle    string `json:"chat_title,omitempty"`    // Chat title
+	ChatUsername string `json:"chat_username,omitempty"` // Chat username
+
+	// Sender information (normalized, searchable)
+	SenderType      string  `json:"sender_type"`                 // "user" or "chat"
+	SenderID        int64   `json:"sender_id"`                   // User ID or sender chat ID
+	SenderName      string  `json:"sender_name,omitempty"`       // Combined name or chat title
+	SenderUsername  string  `json:"sender_username,omitempty"`   // Username (user or chat)
+	SenderFirstName *string `json:"sender_first_name,omitempty"` // First name (user only)
+	SenderLastName  *string `json:"sender_last_name,omitempty"`  // Last name (user only)
+	SenderChatTitle *string `json:"sender_chat_title,omitempty"` // Chat title (chat sender only)
+
+	// Forward information
+	IsForwarded      bool    `json:"is_forwarded"`                  // Whether message is forwarded
+	ForwardFromType  *string `json:"forward_from_type,omitempty"`   // "user", "chat", "name_only"
+	ForwardFromID    *int64  `json:"forward_from_id,omitempty"`     // Forwarded from user/chat ID
+	ForwardFromName  *string `json:"forward_from_name,omitempty"`   // Forwarded from name
+	ForwardTimestamp *int64  `json:"forward_timestamp,omitempty"`   // Forward date
+
+	// Content information
+	ContentType    string  `json:"content_type"`               // "text", "sticker", "photo", "video", "document", "other"
+	Text           string  `json:"text,omitempty"`             // Message text
+	Caption        *string `json:"caption,omitempty"`          // Media caption
+	StickerEmoji   *string `json:"sticker_emoji,omitempty"`    // Sticker emoji
+	StickerSetName *string `json:"sticker_set_name,omitempty"` // Sticker set name
+
+	// Entities (unchanged)
+	Entities []MessageEntity `json:"entities,omitempty"` // Message entities (mentions, hashtags, etc.)
+
+	// Soft-delete (unchanged)
+	IsDeleted bool  `json:"is_deleted"`         // Soft-delete flag
+	DeletedAt int64 `json:"deleted_at,omitempty"` // Deletion timestamp
+
+	// Backward compatibility (deprecated, will be removed later)
+	Chat     Chat `json:"chat"`      // Old nested chat object
+	FromUser User `json:"from_user"` // Old nested user object
+
+	// Full message (stored, not indexed)
+	RawMessage map[string]interface{} `json:"raw_message,omitempty"` // Complete Pyrogram message JSON
 }
 
 // SearchRequest represents a search query

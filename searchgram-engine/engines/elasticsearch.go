@@ -112,11 +112,83 @@ func (e *ElasticsearchEngine) initializeIndex(shards, replicas int) error {
 		},
 		"mappings": map[string]interface{}{
 			"properties": map[string]interface{}{
+				// Core identifiers
 				"id": map[string]interface{}{
 					"type": "keyword",
 				},
 				"message_id": map[string]interface{}{
 					"type": "long",
+				},
+				"chat_id": map[string]interface{}{
+					"type": "long",
+				},
+				"timestamp": map[string]interface{}{
+					"type": "long",
+				},
+				"date": map[string]interface{}{
+					"type": "long",
+				},
+
+				// Chat information (searchable)
+				"chat_type": map[string]interface{}{
+					"type": "keyword",
+				},
+				"chat_title": map[string]interface{}{
+					"type":     "text",
+					"analyzer": "cjk_analyzer",
+				},
+				"chat_username": map[string]interface{}{
+					"type": "keyword",
+				},
+
+				// Sender information (normalized)
+				"sender_type": map[string]interface{}{
+					"type": "keyword",
+				},
+				"sender_id": map[string]interface{}{
+					"type": "long",
+				},
+				"sender_name": map[string]interface{}{
+					"type":     "text",
+					"analyzer": "cjk_analyzer",
+				},
+				"sender_username": map[string]interface{}{
+					"type": "keyword",
+				},
+				"sender_first_name": map[string]interface{}{
+					"type":     "text",
+					"analyzer": "cjk_analyzer",
+				},
+				"sender_last_name": map[string]interface{}{
+					"type":     "text",
+					"analyzer": "cjk_analyzer",
+				},
+				"sender_chat_title": map[string]interface{}{
+					"type":     "text",
+					"analyzer": "cjk_analyzer",
+				},
+
+				// Forward information
+				"is_forwarded": map[string]interface{}{
+					"type": "boolean",
+				},
+				"forward_from_type": map[string]interface{}{
+					"type": "keyword",
+				},
+				"forward_from_id": map[string]interface{}{
+					"type": "long",
+				},
+				"forward_from_name": map[string]interface{}{
+					"type":     "text",
+					"analyzer": "cjk_analyzer",
+				},
+				"forward_timestamp": map[string]interface{}{
+					"type": "long",
+				},
+
+				// Content information
+				"content_type": map[string]interface{}{
+					"type": "keyword",
 				},
 				"text": map[string]interface{}{
 					"type":     "text",
@@ -128,6 +200,45 @@ func (e *ElasticsearchEngine) initializeIndex(shards, replicas int) error {
 						},
 					},
 				},
+				"caption": map[string]interface{}{
+					"type":     "text",
+					"analyzer": "cjk_analyzer",
+				},
+				"sticker_emoji": map[string]interface{}{
+					"type": "keyword",
+				},
+				"sticker_set_name": map[string]interface{}{
+					"type": "keyword",
+				},
+
+				// Entities (unchanged)
+				"entities": map[string]interface{}{
+					"type": "nested",
+					"properties": map[string]interface{}{
+						"type": map[string]interface{}{
+							"type": "keyword",
+						},
+						"offset": map[string]interface{}{
+							"type": "integer",
+						},
+						"length": map[string]interface{}{
+							"type": "integer",
+						},
+						"user_id": map[string]interface{}{
+							"type": "long",
+						},
+					},
+				},
+
+				// Soft-delete (unchanged)
+				"is_deleted": map[string]interface{}{
+					"type": "boolean",
+				},
+				"deleted_at": map[string]interface{}{
+					"type": "long",
+				},
+
+				// Backward compatibility (deprecated, keep for now)
 				"chat": map[string]interface{}{
 					"properties": map[string]interface{}{
 						"id": map[string]interface{}{
@@ -166,34 +277,11 @@ func (e *ElasticsearchEngine) initializeIndex(shards, replicas int) error {
 						},
 					},
 				},
-				"date": map[string]interface{}{
-					"type": "long",
-				},
-				"timestamp": map[string]interface{}{
-					"type": "long",
-				},
-				"entities": map[string]interface{}{
-					"type": "nested",
-					"properties": map[string]interface{}{
-						"type": map[string]interface{}{
-							"type": "keyword",
-						},
-						"offset": map[string]interface{}{
-							"type": "integer",
-						},
-						"length": map[string]interface{}{
-							"type": "integer",
-						},
-						"user_id": map[string]interface{}{
-							"type": "long",
-						},
-					},
-				},
-				"is_deleted": map[string]interface{}{
-					"type": "boolean",
-				},
-				"deleted_at": map[string]interface{}{
-					"type": "long",
+
+				// Full message (stored, not indexed)
+				"raw_message": map[string]interface{}{
+					"type":    "object",
+					"enabled": false, // Don't index, just store
 				},
 			},
 		},
@@ -307,47 +395,71 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 	boolQuery := elastic.NewBoolQuery()
 
 	// Text search query (fuzzy or exact)
+	// Search in both text and caption fields
 	if req.Keyword != "" {
 		if req.ExactMatch {
 			// Exact match using match_phrase
-			matchQuery := elastic.NewMatchPhraseQuery("text.exact", req.Keyword)
-			boolQuery.Must(matchQuery)
-			log.WithField("query_type", "exact_match_phrase").Info("DEBUG: Using exact match query")
+			// Search in both text and caption
+			textCaptionQuery := elastic.NewBoolQuery()
+			textCaptionQuery.Should(elastic.NewMatchPhraseQuery("text.exact", req.Keyword))
+			textCaptionQuery.Should(elastic.NewMatchPhraseQuery("caption", req.Keyword))
+			boolQuery.Must(textCaptionQuery)
+			log.WithField("query_type", "exact_match_phrase").Info("DEBUG: Using exact match query (text + caption)")
 		} else {
 			// Fuzzy match using standard analyzer
+			// Search in both text and caption
 			// NOTE: Fuzziness removed for CJK compatibility
 			// CJK bigram tokenization doesn't work well with AUTO fuzziness
 			// because bigrams are only 2 characters long and must match exactly with AUTO
-			matchQuery := elastic.NewMatchQuery("text", req.Keyword)
-			boolQuery.Must(matchQuery)
-			log.WithField("query_type", "fuzzy_match").Info("DEBUG: Using fuzzy match query")
+			textCaptionQuery := elastic.NewBoolQuery()
+			textCaptionQuery.Should(elastic.NewMatchQuery("text", req.Keyword))
+			textCaptionQuery.Should(elastic.NewMatchQuery("caption", req.Keyword))
+			boolQuery.Must(textCaptionQuery)
+			log.WithField("query_type", "fuzzy_match").Info("DEBUG: Using fuzzy match query (text + caption)")
 		}
 	}
 
 	// Filter by chat type
 	if req.ChatType != "" {
-		chatTypeFilter := elastic.NewTermQuery("chat.type", strings.ToUpper(req.ChatType))
+		// Use new field, fallback to old for backward compat
+		chatTypeFilter := elastic.NewBoolQuery()
+		chatTypeFilter.Should(elastic.NewTermQuery("chat_type", strings.ToUpper(req.ChatType)))
+		chatTypeFilter.Should(elastic.NewTermQuery("chat.type", strings.ToUpper(req.ChatType)))
 		boolQuery.Filter(chatTypeFilter)
 	}
 
-	// Filter by username
+	// Filter by username (searches sender username)
 	if req.Username != "" {
-		// Try to parse as user ID
+		// Use new normalized sender_username field + old fields for backward compat
 		usernameQuery := elastic.NewBoolQuery()
-		usernameQuery.Should(elastic.NewTermQuery("chat.username", req.Username))
+		// New fields (sender can be user or chat)
+		usernameQuery.Should(elastic.NewTermQuery("sender_username", req.Username))
+		usernameQuery.Should(elastic.NewTermQuery("chat_username", req.Username))
+		// Old fields (backward compat)
 		usernameQuery.Should(elastic.NewTermQuery("from_user.username", req.Username))
+		usernameQuery.Should(elastic.NewTermQuery("chat.username", req.Username))
 		boolQuery.Filter(usernameQuery)
 	}
 
 	// Filter by chat ID (for group-specific searches)
 	if req.ChatID != nil {
-		chatIDFilter := elastic.NewTermQuery("chat.id", *req.ChatID)
+		// Use new field, fallback to old for backward compat
+		chatIDFilter := elastic.NewBoolQuery()
+		chatIDFilter.Should(elastic.NewTermQuery("chat_id", *req.ChatID))
+		chatIDFilter.Should(elastic.NewTermQuery("chat.id", *req.ChatID))
 		boolQuery.Filter(chatIDFilter)
 	}
 
-	// Exclude blocked users
+	// Exclude blocked users (filter by sender_id when sender_type=user)
 	if len(req.BlockedUsers) > 0 {
 		for _, userID := range req.BlockedUsers {
+			// Use new fields with sender_type filter
+			blockedUserQuery := elastic.NewBoolQuery().
+				Filter(elastic.NewTermQuery("sender_type", "user")).
+				Filter(elastic.NewTermQuery("sender_id", userID))
+			boolQuery.MustNot(blockedUserQuery)
+
+			// Also exclude via old field for backward compat
 			boolQuery.MustNot(elastic.NewTermQuery("from_user.id", userID))
 		}
 	}
@@ -424,7 +536,10 @@ func (e *ElasticsearchEngine) Search(req *models.SearchRequest) (*models.SearchR
 func (e *ElasticsearchEngine) Delete(chatID int64) (int64, error) {
 	ctx := context.Background()
 
-	query := elastic.NewTermQuery("chat.id", chatID)
+	// Use new field, fallback to old for backward compat
+	query := elastic.NewBoolQuery()
+	query.Should(elastic.NewTermQuery("chat_id", chatID))
+	query.Should(elastic.NewTermQuery("chat.id", chatID))
 
 	// Soft-delete: mark is_deleted=true and set deleted_at timestamp
 	script := elastic.NewScript("ctx._source.is_deleted = true; ctx._source.deleted_at = params.now").
@@ -451,7 +566,15 @@ func (e *ElasticsearchEngine) Delete(chatID int64) (int64, error) {
 func (e *ElasticsearchEngine) DeleteUser(userID int64) (int64, error) {
 	ctx := context.Background()
 
-	query := elastic.NewTermQuery("from_user.id", userID)
+	// Use new fields (sender_id + sender_type), fallback to old for backward compat
+	query := elastic.NewBoolQuery()
+	// New field: sender_id with type filter
+	senderQuery := elastic.NewBoolQuery().
+		Filter(elastic.NewTermQuery("sender_type", "user")).
+		Filter(elastic.NewTermQuery("sender_id", userID))
+	query.Should(senderQuery)
+	// Old field: from_user.id
+	query.Should(elastic.NewTermQuery("from_user.id", userID))
 
 	// Soft-delete: mark is_deleted=true and set deleted_at timestamp
 	script := elastic.NewScript("ctx._source.is_deleted = true; ctx._source.deleted_at = params.now").
@@ -593,10 +716,11 @@ func (e *ElasticsearchEngine) Dedup() (*models.DedupResponse, error) {
 	log.Info("Starting deduplication process...")
 
 	// Use aggregations to find duplicates by chat_id + message_id
+	// Try new field first, fallback to old if it doesn't exist
 	compositeAgg := elastic.NewCompositeAggregation().
 		Size(1000).
 		Sources(
-			elastic.NewCompositeAggregationTermsValuesSource("chat_id").Field("chat.id"),
+			elastic.NewCompositeAggregationTermsValuesSource("chat_id").Field("chat_id").MissingBucket(true),
 			elastic.NewCompositeAggregationTermsValuesSource("message_id").Field("message_id"),
 		)
 
@@ -742,8 +866,13 @@ func (e *ElasticsearchEngine) GetUserStats(req *models.UserStatsRequest) (*model
 	ctx := context.Background()
 
 	// Build base query: filter by group and time range
+	// Use new field with fallback to old for backward compat
+	chatIDFilter := elastic.NewBoolQuery()
+	chatIDFilter.Should(elastic.NewTermQuery("chat_id", req.GroupID))
+	chatIDFilter.Should(elastic.NewTermQuery("chat.id", req.GroupID))
+
 	baseQuery := elastic.NewBoolQuery().
-		Filter(elastic.NewTermQuery("chat.id", req.GroupID)).
+		Filter(chatIDFilter).
 		Filter(elastic.NewRangeQuery("timestamp").Gte(req.FromTimestamp).Lte(req.ToTimestamp))
 
 	// Exclude deleted messages unless explicitly included
@@ -752,9 +881,19 @@ func (e *ElasticsearchEngine) GetUserStats(req *models.UserStatsRequest) (*model
 	}
 
 	// Query 1: Count messages from the specific user
+	// Use new fields (sender_id + sender_type), fallback to old
+	userIDFilter := elastic.NewBoolQuery()
+	// New field: sender_id with type filter
+	senderQuery := elastic.NewBoolQuery().
+		Filter(elastic.NewTermQuery("sender_type", "user")).
+		Filter(elastic.NewTermQuery("sender_id", req.UserID))
+	userIDFilter.Should(senderQuery)
+	// Old field: from_user.id
+	userIDFilter.Should(elastic.NewTermQuery("from_user.id", req.UserID))
+
 	userQuery := elastic.NewBoolQuery().
 		Must(baseQuery).
-		Filter(elastic.NewTermQuery("from_user.id", req.UserID))
+		Filter(userIDFilter)
 
 	userCount, err := e.client.Count(e.index).Query(userQuery).Do(ctx)
 	if err != nil {
@@ -786,7 +925,7 @@ func (e *ElasticsearchEngine) GetUserStats(req *models.UserStatsRequest) (*model
 		// Mentions out: messages sent by user that contain mentions
 		mentionsOutQuery := elastic.NewBoolQuery().
 			Must(baseQuery).
-			Filter(elastic.NewTermQuery("from_user.id", req.UserID)).
+			Filter(userIDFilter). // Use same user filter as above
 			Filter(elastic.NewNestedQuery("entities", elastic.NewBoolQuery().Should(
 				elastic.NewTermQuery("entities.type", "mention"),
 				elastic.NewTermQuery("entities.type", "text_mention"),
@@ -800,9 +939,19 @@ func (e *ElasticsearchEngine) GetUserStats(req *models.UserStatsRequest) (*model
 		}
 
 		// Mentions in: messages from others that mention this user (text_mention entities)
+		// Exclude messages from the user themselves
+		notUserFilter := elastic.NewBoolQuery()
+		// New field: exclude sender_id with type filter
+		notSenderQuery := elastic.NewBoolQuery().
+			Filter(elastic.NewTermQuery("sender_type", "user")).
+			Filter(elastic.NewTermQuery("sender_id", req.UserID))
+		notUserFilter.MustNot(notSenderQuery)
+		// Old field: exclude from_user.id
+		notUserFilter.MustNot(elastic.NewTermQuery("from_user.id", req.UserID))
+
 		mentionsInQuery := elastic.NewBoolQuery().
 			Must(baseQuery).
-			MustNot(elastic.NewTermQuery("from_user.id", req.UserID)).
+			Must(notUserFilter).
 			Filter(elastic.NewNestedQuery("entities", elastic.NewBoolQuery().
 				Must(elastic.NewTermQuery("entities.type", "text_mention")).
 				Must(elastic.NewTermQuery("entities.user_id", req.UserID)),
@@ -883,8 +1032,10 @@ func (e *ElasticsearchEngine) CleanCommands() (*models.CleanCommandsResponse, er
 func (e *ElasticsearchEngine) GetMessageIDs(chatID int64) (*models.GetMessageIDsResponse, error) {
 	ctx := context.Background()
 
-	// Query to filter by chat ID
-	query := elastic.NewTermQuery("chat.id", chatID)
+	// Query to filter by chat ID (use new field, fallback to old)
+	query := elastic.NewBoolQuery()
+	query.Should(elastic.NewTermQuery("chat_id", chatID))
+	query.Should(elastic.NewTermQuery("chat.id", chatID))
 
 	// Use scroll API for efficient retrieval of all message IDs
 	scroll := e.client.Scroll(e.index).

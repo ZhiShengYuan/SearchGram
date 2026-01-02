@@ -14,6 +14,7 @@ import httpx
 
 from searchgram.engine import BasicSearchEngine
 from searchgram.jwt_utils import JWTAuth
+from searchgram.message_converter import MessageConverter
 
 
 class HTTPSearchEngine(BasicSearchEngine):
@@ -174,57 +175,15 @@ class HTTPSearchEngine(BasicSearchEngine):
         """
         Convert a Pyrogram message to a dictionary payload.
 
+        Uses the new MessageConverter to generate full JSON template with normalized fields.
+
         Args:
             message: Pyrogram message object
 
         Returns:
             Dictionary payload for API
         """
-        # Extract entities (mentions, hashtags, etc.)
-        entities = []
-        if hasattr(message, 'entities') and message.entities:
-            for entity in message.entities:
-                entity_dict = {
-                    "type": entity.type.name if hasattr(entity.type, 'name') else str(entity.type),
-                    "offset": entity.offset,
-                    "length": entity.length,
-                }
-                # For text mentions, include user information
-                if hasattr(entity, 'user') and entity.user:
-                    entity_dict["user_id"] = entity.user.id
-                    entity_dict["user"] = {
-                        "id": entity.user.id,
-                        "first_name": getattr(entity.user, 'first_name', ''),
-                        "last_name": getattr(entity.user, 'last_name', ''),
-                        "username": getattr(entity.user, 'username', ''),
-                    }
-                entities.append(entity_dict)
-
-        payload = {
-            "id": f"{message.chat.id}-{message.id}",
-            "message_id": message.id,
-            "text": message.text or "",
-            "chat": {
-                "id": message.chat.id,
-                "type": message.chat.type.name if hasattr(message.chat.type, 'name') else str(message.chat.type),
-                "title": getattr(message.chat, 'title', ''),
-                "username": getattr(message.chat, 'username', ''),
-            },
-            "from_user": {
-                "id": message.from_user.id if message.from_user else 0,
-                "is_bot": getattr(message.from_user, 'is_bot', False) if message.from_user else False,
-                "first_name": getattr(message.from_user, 'first_name', '') if message.from_user else '',
-                "last_name": getattr(message.from_user, 'last_name', '') if message.from_user else '',
-                "username": getattr(message.from_user, 'username', '') if message.from_user else '',
-            },
-            "date": int(message.date.timestamp()) if hasattr(message, 'date') and message.date else 0,
-            "timestamp": int(message.date.timestamp()) if hasattr(message, 'date') and message.date else 0,
-            "entities": entities,
-            "is_deleted": False,
-            "deleted_at": 0,
-        }
-
-        return payload
+        return MessageConverter.convert_to_dict(message)
 
     def upsert(self, message: "types.Message") -> None:
         """
