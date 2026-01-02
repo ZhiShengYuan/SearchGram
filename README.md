@@ -1,42 +1,49 @@
 # SearchGram
 
-SearchGram is a Telegram bot that improves search experience for Chinese, Japanese, and Korean (CJK) languages and
-provides message backup functionality.
+SearchGram is a Telegram bot that improves search experience for Chinese, Japanese, and Korean (CJK) languages and provides message backup functionality with advanced privacy controls and activity statistics.
 
 # Introduction
 
 Telegram's search function has poor support for CJK languages because there are no spaces to separate words.
 
-Issues regarding this have been reported years ago but have yet to be resolved.
+Issues regarding this have been reported years ago but have yet to be resolved:
 
 * https://github.com/tdlib/td/issues/1004
 * https://bugs.telegram.org/c/724
 
-# Feature
+# Features
 
 **Search Capabilities:**
-* Text message search with CJK language support
-* Typo-tolerant and fuzzy search for Chinese, Japanese, Korean
-* Filters for GROUP, CHANNEL, PRIVATE, SUPERGROUP, and BOT chat types
-* Username/ID filtering for targeted searches
-* Caption search for photos and documents
-* Seamless background chat history sync
-* Paginated results with inline navigation
+* 🔍 Text message search with CJK language support
+* 🎯 Typo-tolerant and fuzzy search for Chinese, Japanese, Korean
+* 🗂️ Filters for GROUP, CHANNEL, PRIVATE, SUPERGROUP, and BOT chat types
+* 👤 Username/ID filtering for targeted searches
+* 📎 Caption search for photos and documents
+* 🔄 On-demand and background chat history sync via HTTP API
+* 📄 Paginated results with inline navigation
+* 🗑️ Soft-delete system (messages marked deleted but preserved for analytics)
 
-**Privacy & Access Control (NEW):**
+**Privacy & Access Control:**
 * 🔒 **User Privacy Controls**: Anyone can opt-out via `/block_me` command
-* 🔐 **Three Access Modes**: Private (owner only), Group (whitelisted), Public
+* 🔐 **Three Access Modes**: Private (owner only), Group (whitelisted with granular permissions), Public
 * 🛡️ **Privacy-First**: Blocked users automatically filtered from all search results
 * 👥 **Group Support**: Works in whitelisted Telegram groups
 * 📊 **Transparent**: Shows who requested searches in group mode
+* 🎭 **Granular Permissions**: Per-user group access control with admin roles
+
+**Activity & Analytics:**
+* 📈 **User Activity Stats**: `/mystats` command to view message counts and activity ratios
+* 💬 **Mention Tracking**: Track outgoing and incoming mentions (who you mentioned vs who mentioned you)
+* ⏰ **Flexible Time Windows**: Query stats by relative periods (7d, 30d, 1y) or absolute date ranges
+* 📊 **Group Analytics**: Calculate your percentage of group activity
 
 **Performance & Reliability:**
 * 🚀 **High-Performance Go Service**: Dedicated microservice for search operations (1000-5000 req/s)
-* 🔌 **Multiple Backends**: HTTP (Go service), MeiliSearch, MongoDB, ZincSearch, Elasticsearch
-* ⚡ **Optimized Architecture**: Go service with Elasticsearch for best performance and CJK support
+* ⚡ **HTTP-Only Architecture**: Unified HTTP API for all search operations
 * 🔄 **Auto-Recovery**: Resume-capable sync system with checkpoints
-* 📊 **Monitoring**: Health checks, statistics, structured logging
-* 🛡️ **Security**: Elasticsearch credentials isolated in Go service
+* 📊 **Monitoring**: Health checks, statistics, query logging, structured logging
+* 🛡️ **Security**: JWT-based authentication with Ed25519 keys, Elasticsearch credentials isolated in Go service
+* 🔌 **Cross-Server Support**: Bot and client can run on different machines
 
 # search syntax
 
@@ -48,14 +55,12 @@ Issues regarding this have been reported years ago but have yet to be resolved.
 6. `/private [username] keyword`: search in private chat with username, if username is omitted, search in all private
    chats. This also applies to all above search types.\n
 
-# commands
+# Commands
 
 **Search Commands:**
 ```shell
-/start - Start the bot
+/start - Start the bot and get welcome message
 /help - Show comprehensive help with search syntax and privacy info
-/ping - Check bot health and database stats (owner only)
-/delete - Delete all messages from specific chat (owner only)
 /bot - Search messages from bots
 /channel - Search messages from channels
 /group - Search messages from groups
@@ -63,11 +68,39 @@ Issues regarding this have been reported years ago but have yet to be resolved.
 /supergroup - Search messages from supergroups
 ```
 
-**Privacy Commands (NEW):**
+**Privacy Commands:**
 ```shell
 /block_me - Opt-out: Your messages won't appear in anyone's search
 /unblock_me - Opt-in: Allow your messages in search results
 /privacy_status - Check your current privacy status
+```
+
+**Activity Stats Commands (Group Only):**
+```shell
+/mystats - Show your activity stats in the last year (default)
+/mystats 30d - Show stats for last 30 days
+/mystats 90d at - Include mention counts (outgoing and incoming)
+/mystats 2025-01-01..2025-12-31 - Custom date range
+```
+
+**Sync Commands (Owner Only):**
+```shell
+/sync <chat_id> - Add a chat to the sync queue for indexing
+/sync_status - Check progress of all sync tasks
+/sync_pause <chat_id> - Pause an ongoing sync task
+/sync_resume <chat_id> - Resume a paused sync task
+/sync_list - List all sync tasks (alias for /sync_status)
+```
+
+**Admin Commands (Owner Only):**
+```shell
+/ping - Comprehensive bot health check with stats
+/dedup - Remove duplicate messages from database
+/delete <chat_id> - Soft-delete messages from specific chat
+/logs [limit] - View recent query logs (default: 20, max: 100)
+/logstats - View query log statistics
+/settings [key] [value] - View or update database settings
+/cleanup_logs - Clean up old query logs based on retention settings
 ```
 
 **Why Privacy Matters:**
@@ -75,27 +108,57 @@ SearchGram indexes messages for search, but respects your privacy. Use `/block_m
 
 # Architecture
 
-SearchGram uses a **microservice architecture** for optimal performance and scalability:
+SearchGram uses a **microservice architecture** with three main components:
 
 ```
-┌─────────────┐     HTTP API      ┌──────────────┐     Native      ┌──────────────┐
-│   Telegram  │ ◄────────────────►│ Go Service   │ ◄──────────────►│ Elasticsearch│
-│   Bot (Py)  │   (8080)          │ (CJK Engine) │   Protocol      │  (CJK Index) │
-└─────────────┘                   └──────────────┘                 └──────────────┘
+┌─────────────┐     HTTP/2 API    ┌──────────────┐     Native      ┌──────────────┐
+│  Client     │ ──────────────────►│ Go Search    │ ◄──────────────►│ Elasticsearch│
+│  (Userbot)  │   JWT Auth        │   Service    │   Protocol      │  (CJK Index) │
+│   :8082     │                   │    :8080     │                 └──────────────┘
+└─────────────┘                   └──────────────┘
+       ▲                                  ▲
+       │                                  │
+       │         HTTP/2 API               │
+       │         JWT Auth                 │
+       │                                  │
+       └──────────────────────────────────┘
+                      │
+                      ▼
+              ┌──────────────┐
+              │  Telegram    │
+              │  Bot (Py)    │
+              └──────────────┘
 ```
 
 **Components:**
-1. **Python Bot**: Telegram interface (client + bot)
-2. **Go Search Service**: High-performance search operations (recommended)
-3. **Search Backend**: Elasticsearch with CJK bigram tokenization
+
+1. **Client Process** (Python userbot):
+   - Runs as a user session (requires phone number login)
+   - Intercepts all incoming/outgoing messages
+   - Sends messages to Go search service for indexing
+   - Provides HTTP API (port 8082) for bot-controlled sync
+   - Handles background chat history sync from `config.json`
+
+2. **Bot Process** (Python bot):
+   - Runs as a Telegram bot (uses bot token)
+   - Provides search interface via commands and text messages
+   - Sends search queries to Go service via HTTP/2 API
+   - Controls sync operations via userbot HTTP API
+   - Supports three access modes with granular permissions
+
+3. **Go Search Service** (standalone microservice):
+   - High-performance search operations (1000-5000 req/s)
+   - CJK-optimized Elasticsearch backend with bigram tokenization
+   - JWT-based authentication with Ed25519 keys
+   - Runs in the same LAN as Elasticsearch for low-latency access
+   - Exposes REST API (port 8080) for Python services
 
 **Why This Architecture?**
 - ⚡ **10x Performance**: Go service handles 1000-5000 req/s vs 100-200 req/s for Python
-- 🔒 **Better Security**: Elasticsearch credentials isolated in Go service
+- 🔒 **Better Security**: JWT authentication, Elasticsearch credentials isolated in Go service
 - 📈 **Horizontal Scaling**: Run multiple Go instances behind load balancer
-- 🔌 **Flexible**: Easy to switch search backends
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed design and [GO_SERVICE_MIGRATION.md](GO_SERVICE_MIGRATION.md) for migration guide.
+- 🌐 **Cross-Server Support**: Bot and client can run on different machines
+- 🔌 **Service Isolation**: Each component can be deployed and scaled independently
 
 # How It Works
 
@@ -107,7 +170,11 @@ SearchGram works by:
 4. **Bot Interface**: Provides search via Telegram commands
 5. **Results**: Fast, accurate search with privacy filtering
 
-**History Sync**: SearchGram can sync chat history automatically using checkpoint-based resume system. Configure in `config.json`.
+**History Sync**:
+- **Background Sync**: Configure chats in `config.json` for automatic sync on startup
+- **On-Demand Sync**: Use `/sync <chat_id>` command to add chats to sync queue
+- **Resume Capability**: Progress saved to checkpoints, survives restarts
+- **Sequential Processing**: One chat at a time to avoid rate limits
 
 # Screenshots
 
@@ -118,30 +185,28 @@ SearchGram works by:
 
 # System Requirements
 
-Any system that can run Python 3.8+ and one of the supported search engines should be able to run SearchGram.
+**Software:**
+- Python 3.8+
+- Go 1.19+ (for search service)
+- Elasticsearch 7.x or 8.x
 
-## Supported Search Engines
+**Hardware Recommendations:**
+- **RAM**: At least 2GB total
+  - Elasticsearch: 1GB minimum (configure heap size: `ES_JAVA_OPTS=-Xms512m -Xmx512m`)
+  - Go Service: ~100MB
+  - Python Processes: ~200MB combined
+- **Storage**: Depends on message volume (Elasticsearch indexes)
+- **Network**: Low-latency connection between Go service and Elasticsearch recommended
 
-SearchGram supports multiple search backends:
-
-- **HTTP (Go Service)** ⭐ **RECOMMENDED** - High-performance Go microservice with Elasticsearch backend
+**Search Engine:**
+SearchGram now uses **HTTP-only architecture** with the Go search service:
+- ✅ **HTTP (Go Service)**: High-performance microservice with Elasticsearch backend
   - 10x faster than direct connections (1000-5000 req/s)
   - CJK bigram tokenization for optimal Asian language search
+  - JWT-based authentication with Ed25519 keys
   - Secure credential isolation
   - Horizontal scalability
-- **Elasticsearch** - Direct connection (legacy, use HTTP mode instead)
-- **MeiliSearch** - Fast, typo-tolerant search with good CJK support (legacy)
-- **MongoDB** - Document database with regex-based search and CJK conversion (legacy)
-- **ZincSearch** - Lightweight full-text search engine (legacy)
-
-### Memory Requirements
-
-Better to have bigger RAM for optimal performance:
-
-- **MeiliSearch**: Can limit memory usage with `MEILI_MAX_INDEXING_MEMORY=800M` ([docs](https://www.meilisearch.com/docs/learn/configuration/instance_options#max-indexing-memory))
-- **Elasticsearch**: Recommended at least 1GB RAM, configure Java heap size via `ES_JAVA_OPTS=-Xms512m -Xmx512m`
-- **MongoDB**: Typically requires 1-2GB RAM for good performance
-- **ZincSearch**: Lightweight, works well with limited resources
+- ❌ **Legacy Engines Removed**: MeiliSearch, MongoDB, ZincSearch, direct Elasticsearch connections are no longer supported (security and maintainability)
 
 # Installation
 
@@ -149,38 +214,24 @@ Better to have bigger RAM for optimal performance:
 
 Please follow the steps below to install SearchGram on your own server.
 
-This guide will show you how to install SearchGram with our default search engine, MeiliSearch.
-
-### Using Elasticsearch
-
-To use Elasticsearch instead of MeiliSearch, set the `ENGINE` environment variable to `elastic`:
-
-```python
-ENGINE = "elastic"
-ELASTIC_HOST = "http://localhost:9200"
-ELASTIC_USER = "elastic"
-ELASTIC_PASS = "your-password"
-```
-
-Elasticsearch provides the best search quality with:
-- CJK bigram tokenization for optimal Chinese/Japanese/Korean search
-- Advanced filtering and sorting capabilities
-- Better performance for large message volumes (millions of messages)
-- Professional-grade scalability and reliability
-
 ## 1. Preparation
 
-* Download or clone this repository
-* Install Python from here: https://www.python.org/downloads/
-* Install MeiliSearch from here: https://github.com/meilisearch/meilisearch
-* Apply for APP_ID and APP_HASH from here: https://my.telegram.org/
-* Obtain your bot token by contacting https://t.me/BotFather.
-* Obtain your user ID by contacting https://t.me/blog_update_bot.
+**Download and Install:**
+* Clone this repository: `git clone https://github.com/BennyThink/SearchGram.git`
+* Install Python 3.8+ from: https://www.python.org/downloads/
+* Install Go 1.19+ from: https://go.dev/dl/
+* Install Elasticsearch 7.x or 8.x:
+  - Docker: `docker run -d -p 9200:9200 -e "discovery.type=single-node" docker.elastic.co/elasticsearch/elasticsearch:8.11.0`
+  - Or download from: https://www.elastic.co/downloads/elasticsearch
 
-## 2. Install dependencies
+**Telegram Setup:**
+* Apply for APP_ID and APP_HASH from: https://my.telegram.org/
+* Obtain your bot token by contacting: https://t.me/BotFather
+* Obtain your user ID by contacting: https://t.me/userinfobot
 
-Install all required Python packages (including HTTP/2 support):
+## 2. Install Dependencies
 
+**Python Dependencies:**
 ```bash
 # Quick install using the installation script
 ./install_deps.sh
@@ -189,70 +240,131 @@ Install all required Python packages (including HTTP/2 support):
 pip3 install -r requirements.txt
 ```
 
-**New in latest version**: HTTP/2 support with connection pooling for better performance when using the Go search service. See [HTTP2_IMPLEMENTATION.md](HTTP2_IMPLEMENTATION.md) for details.
-
-## 3. Modify environment file
-
-Use your favorite editor to modify `config.py`, example:
-
-```python
-# Telegram credentials
-APP_ID = 176552
-APP_HASH = "667276jkajhw"
-TOKEN = "123456:8hjhad"
-OWNER_ID = "2311231"
-
-# Search engine (meili, mongo, zinc, elastic)
-ENGINE = "meili"
-MEILI_HOST = "localhost"
-
-# Access control (private, group, public)
-BOT_MODE = "private"  # Default: owner only
-
-# For group mode (optional):
-# ALLOWED_GROUPS = [-1001234567890, -1009876543210]
-# ALLOWED_USERS = [123456789, 987654321]
+**Go Dependencies** (for search service):
+```bash
+cd searchgram-engine
+go mod download
 ```
 
-If you have limited network access, such as in China, you will need to set up a proxy.
+## 3. Generate Authentication Keys
 
-```python
-PROXY = {"scheme": "socks5", "hostname": "localhost", "port": 1080}
+SearchGram requires Ed25519 keys for JWT authentication:
+
+```bash
+# Generate Ed25519 private key
+openssl genpkey -algorithm ed25519 -out private_key.pem
+
+# Extract public key
+openssl pkey -in private_key.pem -pubout -out public_key.pem
 ```
 
-### Group Mode Configuration
+## 4. Configure SearchGram
 
-To enable the bot in Telegram groups:
+Create and edit `config.json` from the example template:
 
-```python
-BOT_MODE = "group"
-ALLOWED_GROUPS = [-1001234567890]  # Your group IDs
-ALLOWED_USERS = [123456789]  # Additional authorized users
+```bash
+cp config.example.json config.json
+nano config.json  # or use your favorite editor
 ```
 
-Then add the bot to your group and anyone in the group can search (with privacy controls).
+**Minimal Configuration Example:**
 
-## 4. Login to client
+```json
+{
+  "telegram": {
+    "app_id": 176552,
+    "app_hash": "your_app_hash",
+    "token": "your_bot_token",
+    "owner_id": 123456789
+  },
+  "auth": {
+    "use_jwt": true,
+    "public_key_path": "public_key.pem",
+    "private_key_path": "private_key.pem",
+    "issuer": "searchgram",
+    "audience": "search",
+    "token_ttl": 300
+  },
+  "services": {
+    "search": {
+      "base_url": "http://127.0.0.1:8080"
+    },
+    "userbot": {
+      "base_url": "http://127.0.0.1:8082"
+    }
+  },
+  "search_service": {
+    "server": {
+      "host": "127.0.0.1",
+      "port": 8080
+    },
+    "elasticsearch": {
+      "host": "http://localhost:9200",
+      "username": "elastic",
+      "password": "your_elasticsearch_password",
+      "index": "telegram"
+    }
+  },
+  "bot": {
+    "mode": "private"
+  }
+}
+```
 
-Open a terminal (such as cmd or iTerm), navigate to the directory where you have saved the code, and then:
+**Optional: Proxy Configuration** (for China or restricted networks):
 
-```shell
-# Method 1: Using runner script (recommended)
-python3 run_client.py
+```json
+{
+  "telegram": {
+    "proxy": {
+      "scheme": "socks5",
+      "hostname": "localhost",
+      "port": 1080
+    }
+  }
+}
+```
 
-# Method 2: As Python module
+**Optional: Group Mode with Granular Permissions:**
+
+```json
+{
+  "bot": {
+    "mode": "group",
+    "allowed_groups": [-1001234567890, -1009876543210],
+    "allowed_users": [123456789, 987654321],
+    "admins": [111111111],
+    "user_group_permissions": {
+      "123456789": [-1001234567890],
+      "987654321": [-1009876543210, -1001234567890]
+    }
+  }
+}
+```
+
+This configuration means:
+- Owner and admins can search all groups
+- User 123456789 can only search group -1001234567890
+- User 987654321 can search both groups
+
+## 5. First-Time Login
+
+Before running the services, you need to create a Telegram session:
+
+```bash
 python3 -m searchgram.client
 ```
 
-Enter your phone number and log in to the client. You can exit by pressing `Ctrl + C`.
+Enter your phone number and verification code to log in. Session files will be saved to `searchgram/session/`. You can exit with `Ctrl + C` after successful login.
 
-## 5. (optional)Setup sync id
+## 6. Configure Background Sync (Optional)
 
 Configure chat history sync in `config.json`:
 
 ```json
 {
   "sync": {
+    "enabled": true,
     "chats": [
       {"id": -1001234567890, "name": "My Group"},
       {"id": 123456789, "name": "Friend Name"}
@@ -261,42 +373,134 @@ Configure chat history sync in `config.json`:
 }
 ```
 
-The client will automatically sync chat history on startup with resume capability.
+The client will automatically sync chat history on startup with resume capability. Alternatively, use `/sync <chat_id>` command for on-demand syncing.
 
-## 6. Run!
+## 7. Run SearchGram
 
-Open two terminals and run the following commands in each terminal:
+You need **three terminals** to run all services:
 
-```shell
-# Terminal 1: Run client (userbot)
-python3 run_client.py
-# or: python3 -m searchgram.client
-
-# Terminal 2: Run bot (search interface)
-python3 run_bot.py
-# or: python3 -m searchgram.bot
+**Terminal 1 - Go Search Service:**
+```bash
+cd searchgram-engine
+go run main.go
+# Or build and run: go build && ./searchgram-engine
 ```
 
-## 6. (Optional) Migration
+**Terminal 2 - Python Client (Userbot):**
+```bash
+python3 -m searchgram.client
+# This will also start the HTTP API server on port 8082
+```
 
-* add timestamp to all your data for better sorting `python add_timestamp.py`
+**Terminal 3 - Python Bot:**
+```bash
+python3 -m searchgram.bot
+```
 
-# Sponsor
+**Quick Start Order:**
+1. Start Elasticsearch (if not already running)
+2. Start Go search service (Terminal 1)
+3. Start Python client (Terminal 2)
+4. Start Python bot (Terminal 3)
 
-* [Buy me a coffee](https://www.buymeacoffee.com/bennythink)
-* [Afdian](https://afdian.net/@BennyThink)
-* [GitHub Sponsor](https://github.com/sponsors/BennyThink)
+**Verify Everything Works:**
+- Send `/ping` to your bot to check health status
+- Try a simple search query
 
-## Stripe
+# Cross-Server Deployment
 
-If you would like to donate to the project using Stripe, please click on the button below.
+SearchGram supports running services on different machines:
 
-You can choose the currency and payment method that best suits you.
+**Example Setup:**
+- **Server A** (ucre3): Runs client (userbot) and Elasticsearch
+- **Server B** (nomao-lax): Runs bot and Go search service
 
-| USD(Card, Apple Pay and Google Pay)              | SEK(Card, Apple Pay and Google Pay)              | CNY(Card, Apple Pay, Google Pay and Alipay)      |
-|--------------------------------------------------|--------------------------------------------------|--------------------------------------------------|
-| [USD](https://buy.stripe.com/cN203sdZB98RevC3cd) | [SEK](https://buy.stripe.com/bIYbMa9JletbevCaEE) | [CNY](https://buy.stripe.com/dR67vU4p13Ox73a6oq) |
-| ![](assets/USD.png)                              | ![](assets/SEK.png)                              | ![](assets/CNY.png)                              |
+**Configuration on Server B (`config.json`):**
+```json
+{
+  "services": {
+    "search": {
+      "base_url": "http://ucre3:8080"
+    },
+    "userbot": {
+      "base_url": "http://ucre3:8082"
+    }
+  }
+}
+```
+
+**Configuration on Server A (`config.json`):**
+```json
+{
+  "http": {
+    "listen": "0.0.0.0",
+    "userbot_port": 8082
+  },
+  "search_service": {
+    "server": {
+      "host": "0.0.0.0",
+      "port": 8080
+    }
+  }
+}
+```
+
+Make sure to configure firewall rules to allow connections between servers on ports 8080 and 8082.
+
+# Advanced Features
+
+## Query Logging
+
+SearchGram includes a SQLite-based query logging system:
+
+- **Enable/Disable**: `DATABASE_ENABLED` in config
+- **Retention**: Configure via `/settings log_retention_days 60`
+- **View Logs**: `/logs [limit]` (owner only)
+- **Statistics**: `/logstats` (owner only)
+- **Cleanup**: `/cleanup_logs` (owner only)
+
+## Activity Statistics
+
+Users can query their own activity stats in groups:
+
+```
+/mystats              # Last year
+/mystats 30d          # Last 30 days
+/mystats 90d at       # Include mentions
+/mystats 2025-01-01..2025-12-31  # Custom date range
+```
+
+## Deduplication
+
+Remove duplicate messages from the database:
+
+```
+/dedup  # Owner only
+```
+
+Useful when re-syncing chats or after indexing errors.
+
+# Troubleshooting
+
+**Connection Errors:**
+- Verify Elasticsearch is running: `curl http://localhost:9200`
+- Check Go service: `curl http://localhost:8080/health`
+- Check userbot API: `curl http://localhost:8082/health`
+
+**Authentication Errors:**
+- Ensure JWT keys are generated and paths are correct in `config.json`
+- Verify `auth.use_jwt` is set to `true`
+- Check issuer/audience configuration matches across services
+
+**Sync Issues:**
+- Check sync status: `/sync_status`
+- View client logs for FloodWait errors
+- Pause and resume: `/sync_pause <chat_id>` then `/sync_resume <chat_id>`
+
+**Search Not Working:**
+- Verify messages are indexed: `/ping` shows message count
+- Check Elasticsearch index: `curl http://localhost:9200/telegram/_count`
+- Review Go service logs for errors
 
 # License
 
