@@ -129,7 +129,7 @@ def deleted_messages_handler(client: "Client", messages: list["types.Message"]):
             logging.error(f"Failed to soft-delete message {message.chat.id}-{message.id}: {e}")
 
 
-@app.on_message(filters.command(["dumpjson"]) & filters.private)
+@app.on_message(filters.command(["dumpjson"]))
 def dumpjson_handler(client: "Client", message: "types.Message"):
     """
     Dump a Telegram message as JSON (owner only).
@@ -139,19 +139,17 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
     2. Just send /dumpjson - dumps the command message itself (includes /dumpjson text)
 
     The userbot will send the JSON dump via the bot to the owner.
+    This command works in both private messages and groups (owner only).
+    Replies are always sent to the owner's private chat via bot.
     """
     import json
     from .bot_http_client import BotHTTPClient
 
-    logging.info(f"Dumpjson handler triggered by user {message.from_user.id if message.from_user else 'unknown'}")
+    logging.info(f"Dumpjson handler triggered by user {message.from_user.id if message.from_user else 'unknown'} in chat {message.chat.id}")
 
-    # Only allow owner to use this command
+    # Only allow owner to use this command - silently ignore others
     if not message.from_user or message.from_user.id != OWNER_ID:
         logging.warning(f"Unauthorized dumpjson attempt from user {message.from_user.id if message.from_user else 'unknown'}")
-        client.send_message(
-            message.chat.id,
-            f"❌ Unauthorized. Only owner (ID: {OWNER_ID}) can use this command."
-        )
         return
 
     try:
@@ -208,10 +206,6 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
         # Check if bot API is healthy
         if not bot_client.health_check():
             logging.error(f"Dumpjson: Bot API at {bot_url} is not healthy")
-            client.send_message(
-                message.chat.id,
-                f"❌ Bot API is not available at {bot_url}\n\nMake sure the bot process is running."
-            )
             bot_client.close()
             return
 
@@ -239,12 +233,6 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
 
         if result.get("success"):
             logging.info(f"Dumpjson: successfully sent JSON dump to owner via bot API, message_id={result.get('message_id')}")
-
-            # Send confirmation to userbot chat
-            client.send_message(
-                message.chat.id,
-                f"✅ JSON dump sent via bot!\n\n**Size:** {len(json_bytes):,} bytes\n**Message ID:** {result.get('message_id')}"
-            )
         else:
             raise Exception(f"Bot API returned error: {result}")
 
@@ -254,13 +242,6 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
         logging.error(f"Error in dumpjson handler: {e}")
         import traceback
         traceback.print_exc()
-        try:
-            client.send_message(
-                message.chat.id,
-                f"❌ Error dumping message:\n\n`{str(e)}`"
-            )
-        except:
-            logging.error("Failed to send error message to user")
 
 
 def sync_history_new():
