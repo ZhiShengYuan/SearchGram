@@ -21,6 +21,7 @@ from .init_client import get_client
 from .sync_api import init_sync_api, run_sync_api
 from .sync_manager import SyncManager
 from .utils import setup_logger
+from .mirror_manager import MirrorManager
 
 setup_logger()
 
@@ -51,6 +52,10 @@ init_sync_api(sync_manager)
 # Start the worker thread for sequential sync processing
 sync_manager.start_worker()
 logging.info("Sync worker thread started - will process chats sequentially")
+
+# Initialize mirror manager
+bot_api_url = config.get("services.bot.base_url", "http://127.0.0.1:8081")
+mirror_manager = MirrorManager(bot_api_base_url=bot_api_url)
 
 # Statistics tracking
 stats = {
@@ -131,6 +136,26 @@ def deleted_messages_handler(client: "Client", messages: list["types.Message"]):
             tgdb.soft_delete_message(message.chat.id, message.id)
         except Exception as e:
             logging.error(f"Failed to soft-delete message {message.chat.id}-{message.id}: {e}")
+
+
+@app.on_message(filters.channel, group=2)
+async def mirror_handler(client: "Client", message: "types.Message"):
+    """
+    Handle messages from monitored channels for mirroring.
+
+    Group 2 ensures this runs after the indexing handler (group 1).
+    Only processes messages from channels that are being mirrored.
+    """
+    if not mirror_manager.enabled:
+        return
+
+    # Check if this is a monitored channel
+    monitored_channels = mirror_manager.get_monitored_channels()
+    if message.chat.id not in monitored_channels:
+        return
+
+    # Handle the message for mirroring
+    await mirror_manager.handle_message(client, message)
 
 
 @app.on_message(filters.text & filters.regex(r"^/dumpjson(?:\s|$)"))

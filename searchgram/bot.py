@@ -26,6 +26,7 @@ from .privacy import privacy_manager
 from .sync_http_client import SyncHTTPClient
 from .time_utils import parse_time_window, format_time_window
 from .utils import setup_logger
+from .mirror_models import MirrorTask
 
 tgdb = SearchEngine()
 
@@ -38,6 +39,24 @@ config = get_config()
 # Initialize sync HTTP client (uses userbot service)
 userbot_url = config.get("services.userbot.base_url", "http://127.0.0.1:8082")
 sync_client = SyncHTTPClient(base_url=userbot_url)
+
+# Initialize mirror tasks from config
+mirror_tasks = {}  # task_id -> MirrorTask
+mirror_enabled = config.get_bool("mirror.enabled", False)
+
+if mirror_enabled:
+    task_configs = config.get("mirror.tasks", [])
+    for task_config in task_configs:
+        try:
+            task = MirrorTask.from_dict(task_config)
+            mirror_tasks[task.id] = task
+            logging.info(f"Loaded mirror task: {task.id} ({task.source_channel} → {task.target_channel})")
+        except Exception as e:
+            logging.error(f"Failed to load mirror task: {e}", exc_info=True)
+
+    logging.info(f"Mirror feature initialized: {len(mirror_tasks)} tasks loaded")
+else:
+    logging.info("Mirror feature is disabled")
 
 # Custom filter to exclude all command messages (starting with /)
 def not_command_filter(_, __, message: types.Message):
@@ -1588,18 +1607,280 @@ async def sync_list_handler(client: "Client", message: "types.Message"):
     await sync_status_handler(client, message)
 
 
+@app.on_message(filters.command(["mirror_status"]))
+@require_owner
+async def mirror_status_handler(client: "Client", message: "types.Message"):
+    """Show status of all mirror tasks (owner only)."""
+    if not mirror_enabled:
+        await message.reply_text("❌ Mirror feature is disabled in config")
+        return
+
+    if not mirror_tasks:
+        await message.reply_text("ℹ️ No mirror tasks configured")
+        return
+
+    # Build status message
+    lines = ["🔄 **Mirror Tasks Status**\n"]
+
+    for task_id, task in mirror_tasks.items():
+        status_emoji = {
+            "active": "✅",
+            "paused": "⏸️",
+            "failed": "❌",
+            "pending": "⏳"
+        }.get(task.status, "❓")
+
+        lines.append(f"**Task:** `{task_id}`")
+        lines.append(f"├─ Source: `{task.source_channel}`")
+        lines.append(f"├─ Target: `{task.target_channel}`")
+        lines.append(f"├─ Status: {status_emoji} {task.status}")
+        lines.append(f"├─ LLM: {'✅' if task.llm_enabled else '❌'} {task.llm_mode if task.llm_enabled else 'disabled'}")
+        lines.append(f"├─ Processed: {task.total_processed:,}")
+        lines.append(f"├─ Mirrored: {task.total_mirrored:,}")
+        lines.append(f"├─ Filtered: {task.total_filtered:,}")
+        lines.append(f"└─ Failed: {task.total_failed:,}")
+
+        if task.last_error:
+            lines.append(f"   └─ Error: `{task.last_error[:100]}`")
+
+        lines.append("")  # Empty line between tasks
+
+    # Overall statistics
+    total_processed = sum(t.total_processed for t in mirror_tasks.values())
+    total_mirrored = sum(t.total_mirrored for t in mirror_tasks.values())
+    total_filtered = sum(t.total_filtered for t in mirror_tasks.values())
+    total_failed = sum(t.total_failed for t in mirror_tasks.values())
+    active_count = sum(1 for t in mirror_tasks.values() if t.status == "active")
+    paused_count = sum(1 for t in mirror_tasks.values() if t.status == "paused")
+
+    lines.append("**Overall Statistics:**")
+    lines.append(f"📊 Total Tasks: {len(mirror_tasks)}")
+    lines.append(f"✅ Active: {active_count}")
+    lines.append(f"⏸️ Paused: {paused_count}")
+    lines.append(f"📈 Total Processed: {total_processed:,}")
+    lines.append(f"🎯 Total Mirrored: {total_mirrored:,}")
+    lines.append(f"🚫 Total Filtered: {total_filtered:,}")
+    lines.append(f"❌ Total Failed: {total_failed:,}")
+
+    # Get database statistics if available
+    if db_manager:
+        try:
+            db_stats = db_manager.get_mirror_statistics()
+            lines.append(f"\n**Database Statistics:**")
+            lines.append(f"📋 Total Operations: {db_stats.get('total_operations', 0):,}")
+            lines.append(f"✅ Success Rate: {db_stats.get('success_rate', 0):.1f}%")
+            lines.append(f"⏱️ Avg Processing Time: {db_stats.get('average_processing_time_ms', 0):.0f}ms")
+            lines.append(f"📅 Last 24h: {db_stats.get('last_24h_operations', 0):,}")
+        except Exception as e:
+            logging.error(f"Failed to get mirror statistics: {e}")
+
+    await message.reply_text(
+        "\n".join(lines),
+        parse_mode=enums.ParseMode.MARKDOWN
+    )
+
+
+@app.on_message(filters.command(["mirror_pause"]))
+@require_owner
+async def mirror_pause_handler(client: "Client", message: "types.Message"):
+    """Pause a mirror task (owner only)."""
+    if not mirror_enabled:
+        await message.reply_text("❌ Mirror feature is disabled in config")
+        return
+
+    # Parse command arguments
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply_text(
+            "❌ Usage: `/mirror_pause <task_id>`\n\n"
+            f"Available tasks: {', '.join(f'`{tid}`' for tid in mirror_tasks.keys())}",
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        return
+
+    task_id = args[1].strip()
+    task = mirror_tasks.get(task_id)
+
+    if not task:
+        await message.reply_text(
+            f"❌ Task `{task_id}` not found\n\n"
+            f"Available tasks: {', '.join(f'`{tid}`' for tid in mirror_tasks.keys())}",
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        return
+
+    if task.status == "paused":
+        await message.reply_text(f"ℹ️ Task `{task_id}` is already paused", parse_mode=enums.ParseMode.MARKDOWN)
+        return
+
+    task.pause()
+    await message.reply_text(f"⏸️ Mirror task `{task_id}` paused", parse_mode=enums.ParseMode.MARKDOWN)
+    logging.info(f"Mirror task {task_id} paused by owner")
+
+
+@app.on_message(filters.command(["mirror_resume"]))
+@require_owner
+async def mirror_resume_handler(client: "Client", message: "types.Message"):
+    """Resume a paused mirror task (owner only)."""
+    if not mirror_enabled:
+        await message.reply_text("❌ Mirror feature is disabled in config")
+        return
+
+    # Parse command arguments
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply_text(
+            "❌ Usage: `/mirror_resume <task_id>`\n\n"
+            f"Available tasks: {', '.join(f'`{tid}`' for tid in mirror_tasks.keys())}",
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        return
+
+    task_id = args[1].strip()
+    task = mirror_tasks.get(task_id)
+
+    if not task:
+        await message.reply_text(
+            f"❌ Task `{task_id}` not found\n\n"
+            f"Available tasks: {', '.join(f'`{tid}`' for tid in mirror_tasks.keys())}",
+            parse_mode=enums.ParseMode.MARKDOWN
+        )
+        return
+
+    if task.status == "active":
+        await message.reply_text(f"ℹ️ Task `{task_id}` is already active", parse_mode=enums.ParseMode.MARKDOWN)
+        return
+
+    task.resume()
+    await message.reply_text(f"▶️ Mirror task `{task_id}` resumed", parse_mode=enums.ParseMode.MARKDOWN)
+    logging.info(f"Mirror task {task_id} resumed by owner")
+
+
+@app.on_message(filters.command(["mirror_logs"]))
+@require_owner
+async def mirror_logs_handler(client: "Client", message: "types.Message"):
+    """View recent mirror operation logs (owner only)."""
+    if not db_manager:
+        await message.reply_text("❌ Database is disabled, mirror logs not available")
+        return
+
+    # Parse command arguments
+    args = message.text.split()
+    limit = 20
+    task_id = None
+
+    if len(args) >= 2:
+        try:
+            limit = int(args[1])
+            limit = min(limit, 100)  # Cap at 100
+        except ValueError:
+            # Not a number, might be task_id
+            task_id = args[1]
+
+    if len(args) >= 3:
+        task_id = args[2]
+
+    try:
+        logs = db_manager.get_recent_mirror_logs(limit=limit, task_id=task_id)
+
+        if not logs:
+            await message.reply_text("ℹ️ No mirror logs found")
+            return
+
+        # Build log message
+        header = f"📋 **Mirror Logs** (Last {len(logs)})"
+        if task_id:
+            header += f" for task `{task_id}`"
+
+        lines = [header, ""]
+
+        for log in logs:
+            timestamp = datetime.fromtimestamp(log["timestamp"], tz=timezone.utc)
+            time_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+            lines.append(f"**{time_str}**")
+            lines.append(f"Task: `{log['task_id']}`")
+            lines.append(f"Source: `{log['source_chat_id']}/{log['source_msg_id']}`")
+
+            if log.get("target_msg_id"):
+                lines.append(f"Target: `{log['target_chat_id']}/{log['target_msg_id']}`")
+
+            lines.append(f"Action: {log['processing_action']}")
+            lines.append(f"Status: {log['status']}")
+
+            if log.get("has_media"):
+                lines.append(f"Media: {log.get('media_type', 'unknown')}")
+
+            if log.get("llm_action"):
+                lines.append(f"LLM: {log['llm_action']}")
+
+            if log.get("keyword_match"):
+                lines.append(f"Keywords: {log['keyword_match']}")
+
+            if log.get("processing_time_ms"):
+                lines.append(f"Time: {log['processing_time_ms']}ms")
+
+            if log.get("error_message"):
+                error_preview = log["error_message"][:100]
+                lines.append(f"Error: `{error_preview}`")
+
+            lines.append("")  # Empty line between logs
+
+        # Send in chunks if too long
+        text = "\n".join(lines)
+        if len(text) > 4000:
+            # Split into chunks
+            chunks = []
+            current_chunk = []
+            current_length = 0
+
+            for line in lines:
+                line_length = len(line) + 1  # +1 for newline
+                if current_length + line_length > 4000:
+                    chunks.append("\n".join(current_chunk))
+                    current_chunk = [line]
+                    current_length = line_length
+                else:
+                    current_chunk.append(line)
+                    current_length += line_length
+
+            if current_chunk:
+                chunks.append("\n".join(current_chunk))
+
+            for chunk in chunks:
+                await message.reply_text(chunk, parse_mode=enums.ParseMode.MARKDOWN)
+        else:
+            await message.reply_text(text, parse_mode=enums.ParseMode.MARKDOWN)
+
+    except Exception as e:
+        logging.error(f"Failed to get mirror logs: {e}", exc_info=True)
+        await message.reply_text(f"❌ Failed to get mirror logs: {str(e)}")
+
+
 if __name__ == "__main__":
     import threading
-    from .bot_api import init_bot_api, run_bot_api
+    from .bot_api import init_bot_api, run_bot_api, app as bot_flask_app
+    from .mirror_api import init_mirror_api
 
     # Initialize bot API with bot client
     init_bot_api(app)
+
+    # Initialize mirror API if enabled
+    if mirror_enabled:
+        init_mirror_api(
+            flask_app=bot_flask_app,
+            tasks=mirror_tasks,
+            bot_client=app,
+            db_manager=db_manager
+        )
+        logging.info("Mirror API initialized")
 
     # Get bot HTTP API configuration
     bot_host = config.get("http.listen", "127.0.0.1")
     bot_port = config.get_int("http.bot_port", 8081)
 
     # Start bot HTTP API server in background thread
+    # Note: Mirror API runs on the same Flask app as bot API
     logging.info(f"Starting bot HTTP API server on {bot_host}:{bot_port}")
     threading.Thread(
         target=run_bot_api,

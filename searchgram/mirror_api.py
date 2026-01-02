@@ -3,12 +3,14 @@ Mirror API
 
 Flask HTTP API for mirror operations on bot side.
 Receives messages from userbot and processes them for mirroring.
+
+Note: Endpoints are registered on the bot_api Flask app, not a separate app.
 """
 
 import logging
 import time
 from typing import Optional
-from flask import Flask, request, jsonify
+from flask import request, jsonify
 from .jwt_auth import require_jwt_auth
 from .mirror_models import (
     MirrorMessage, MirrorLog, MirrorTask, ProcessingAction, MediaType
@@ -22,9 +24,6 @@ from io import BytesIO
 
 logger = logging.getLogger(__name__)
 
-# Flask app
-app = Flask(__name__)
-
 # Global state (set by parent process via init_mirror_api)
 _mirror_tasks = {}  # task_id -> MirrorTask
 _bot_client = None  # Pyrogram bot client
@@ -35,14 +34,16 @@ _jwt_auth = None  # JWT authentication
 
 
 def init_mirror_api(
+    flask_app,
     tasks: dict,
     bot_client,
     db_manager: DatabaseManager
 ):
     """
-    Initialize mirror API with dependencies.
+    Initialize mirror API and register endpoints on Flask app.
 
     Args:
+        flask_app: Flask app instance (from bot_api)
         tasks: Dict of task_id -> MirrorTask
         bot_client: Pyrogram bot client instance
         db_manager: Database manager instance
@@ -58,7 +59,7 @@ def init_mirror_api(
 
     # Initialize Local Bot API client (if configured)
     local_bot_api_url = config.get("services.local_bot_api.base_url")
-    bot_token = config.get("telegram.token")
+    bot_token = config.get("telegram.bot_token") or config.get("telegram.token")
 
     if local_bot_api_url and bot_token:
         try:
@@ -102,16 +103,42 @@ def init_mirror_api(
     from .jwt_utils import load_jwt_auth_from_config
     _jwt_auth = load_jwt_auth_from_config(issuer="bot")
 
-    logger.info("Mirror API initialized")
+    # Register mirror endpoints on the Flask app
+    _register_endpoints(flask_app)
+
+    logger.info("Mirror API initialized and endpoints registered")
 
 
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint."""
-    return jsonify({"status": "ok", "service": "mirror_api"})
+def _register_endpoints(flask_app):
+    """Register mirror API endpoints on the Flask app."""
+
+    # Register all endpoints defined below
+    flask_app.add_url_rule(
+        '/api/v1/mirror/process',
+        'mirror_process',
+        process_mirror,
+        methods=['POST']
+    )
+    flask_app.add_url_rule(
+        '/api/v1/mirror/task/<task_id>',
+        'mirror_task_status',
+        get_task_status,
+        methods=['GET']
+    )
+    flask_app.add_url_rule(
+        '/api/v1/mirror/pause',
+        'mirror_pause',
+        pause_task,
+        methods=['POST']
+    )
+    flask_app.add_url_rule(
+        '/api/v1/mirror/resume',
+        'mirror_resume',
+        resume_task,
+        methods=['POST']
+    )
 
 
-@app.route('/api/v1/mirror/process', methods=['POST'])
 @require_jwt_auth(allowed_issuers=["userbot"])
 def process_mirror():
     """
@@ -401,7 +428,6 @@ def _log_mirror(
         logger.error(f"Failed to log mirror operation: {e}", exc_info=True)
 
 
-@app.route('/api/v1/mirror/task/<task_id>', methods=['GET'])
 @require_jwt_auth(allowed_issuers=["userbot", "bot"])
 def get_task_status(task_id: str):
     """Get status of a mirror task."""
@@ -412,7 +438,6 @@ def get_task_status(task_id: str):
     return jsonify(task.to_dict())
 
 
-@app.route('/api/v1/mirror/pause', methods=['POST'])
 @require_jwt_auth(allowed_issuers=["userbot", "bot"])
 def pause_task():
     """Pause a mirror task."""
@@ -429,7 +454,6 @@ def pause_task():
     return jsonify({"status": "ok", "task_id": task_id})
 
 
-@app.route('/api/v1/mirror/resume', methods=['POST'])
 @require_jwt_auth(allowed_issuers=["userbot", "bot"])
 def resume_task():
     """Resume a paused mirror task."""
@@ -444,15 +468,3 @@ def resume_task():
     logger.info(f"Task {task_id} resumed")
 
     return jsonify({"status": "ok", "task_id": task_id})
-
-
-def run_mirror_api(host: str = "127.0.0.1", port: int = 8081):
-    """
-    Run mirror API server.
-
-    Args:
-        host: Listen address
-        port: Listen port
-    """
-    logger.info(f"Starting mirror API on {host}:{port}")
-    app.run(host=host, port=port, debug=False, threaded=True)
