@@ -879,6 +879,65 @@ func (e *ElasticsearchEngine) CleanCommands() (*models.CleanCommandsResponse, er
 	}, nil
 }
 
+// GetMessageIDs retrieves all message IDs for a specific chat (for gap detection)
+func (e *ElasticsearchEngine) GetMessageIDs(chatID int64) (*models.GetMessageIDsResponse, error) {
+	ctx := context.Background()
+
+	// Query to filter by chat ID
+	query := elastic.NewTermQuery("chat.id", chatID)
+
+	// Use scroll API for efficient retrieval of all message IDs
+	scroll := e.client.Scroll(e.index).
+		Query(query).
+		FetchSourceContext(elastic.NewFetchSourceContext(true).Include("message_id")).
+		Size(1000).
+		Sort("message_id", true) // Sort by message_id ascending
+
+	var messageIDs []int64
+	totalCount := int64(0)
+
+	for {
+		results, err := scroll.Do(ctx)
+		if err != nil {
+			if err == elastic.ErrNoClient {
+				break
+			}
+			log.WithError(err).Error("Failed to scroll message IDs")
+			return nil, fmt.Errorf("failed to retrieve message IDs: %w", err)
+		}
+
+		if results.Hits == nil || len(results.Hits.Hits) == 0 {
+			break
+		}
+
+		// Extract message IDs from results
+		for _, hit := range results.Hits.Hits {
+			var msg models.Message
+			if err := json.Unmarshal(hit.Source, &msg); err != nil {
+				log.WithError(err).Warn("Failed to unmarshal message")
+				continue
+			}
+			messageIDs = append(messageIDs, msg.MessageID)
+		}
+
+		totalCount = results.TotalHits()
+	}
+
+	// Clear scroll context
+	scroll.Clear(ctx)
+
+	log.WithFields(log.Fields{
+		"chat_id": chatID,
+		"count":   len(messageIDs),
+	}).Info("Retrieved message IDs for gap detection")
+
+	return &models.GetMessageIDsResponse{
+		ChatID:     chatID,
+		MessageIDs: messageIDs,
+		Count:      totalCount,
+	}, nil
+}
+
 // Close closes the connection to Elasticsearch
 func (e *ElasticsearchEngine) Close() error {
 	e.client.Stop()

@@ -153,3 +153,15 @@ type CleanCommandsResponse struct {
 	DeletedCount int64  `json:"deleted_count"`
 	Message      string `json:"message,omitempty"`
 }
+
+// GetMessageIDsRequest represents a request to get all message IDs for a chat
+type GetMessageIDsRequest struct {
+	ChatID int64 `json:"chat_id"` // Chat ID to query
+}
+
+// GetMessageIDsResponse represents the list of message IDs in the index
+type GetMessageIDsResponse struct {
+	ChatID     int64   `json:"chat_id"`      // Chat ID
+	MessageIDs []int64 `json:"message_ids"`  // List of message IDs (sorted)
+	Count      int64   `json:"count"`        // Total count
+}

@@ -40,6 +40,9 @@ type SearchEngine interface {
 	// CleanCommands removes all messages starting with '/' (bot commands)
 	CleanCommands() (*models.CleanCommandsResponse, error)
 
+	// GetMessageIDs retrieves all message IDs for a specific chat (for gap detection)
+	GetMessageIDs(chatID int64) (*models.GetMessageIDsResponse, error)
+
 	// Close closes the connection to the search engine
 	Close() error
 }
