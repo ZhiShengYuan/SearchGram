@@ -136,13 +136,13 @@ class SyncManager:
                     "chats": [progress.to_dict() for progress in self.progress_map.values()]
                 }
 
-            # Atomic write
-            temp_file = f"{self.checkpoint_file}.tmp"
-            with open(temp_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            os.replace(temp_file, self.checkpoint_file)
+                # Atomic write (inside lock to prevent race conditions)
+                temp_file = f"{self.checkpoint_file}.tmp"
+                with open(temp_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                os.replace(temp_file, self.checkpoint_file)
 
-            logging.debug(f"Checkpoint saved: {len(self.progress_map)} chats")
+                logging.debug(f"Checkpoint saved: {len(self.progress_map)} chats")
 
         except Exception as e:
             logging.error(f"Failed to save checkpoint: {e}")
