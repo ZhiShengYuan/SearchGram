@@ -252,6 +252,9 @@ def sync_history_new():
     """
     New sync system with resume capability and checkpoint support.
     Replaces the old sync.ini-based system.
+
+    This function ONLY adds chats from config to the queue.
+    The worker thread handles actual syncing sequentially (one at a time).
     """
     if not SYNC_ENABLED:
         logging.info("Sync is disabled in configuration")
@@ -272,94 +275,14 @@ def sync_history_new():
     for chat_id in sync_chats:
         sync_manager.add_chat(chat_id)
 
-    # Get summary before starting
+    # Get summary after adding chats
     summary = sync_manager.get_summary()
     logging.info(
-        f"📊 Sync Queue: {summary['total_chats']} chats, "
+        f"📊 Sync Queue Initialized: {summary['total_chats']} chats, "
         f"{summary['pending']} pending, {summary['completed']} completed, "
         f"{summary['failed']} failed"
     )
-
-    # Send progress notification to saved messages
-    try:
-        progress_msg = app.send_message("me", "🔄 Starting history sync...\n\nInitializing...")
-    except:
-        progress_msg = None
-
-    def update_progress(progress):
-        """Callback to update progress message."""
-        if not progress_msg:
-            return
-
-        try:
-            # Rate limit updates
-            key = f"sync-update-{progress.chat_id}"
-            if not r.exists(key):
-                r.set(key, "ok", ex=5)  # Update at most every 5 seconds
-
-                summary = sync_manager.get_summary()
-                text = f"""
-🔄 **History Sync Progress**
-
-**Current Chat:** `{progress.chat_id}`
-**Progress:** {progress.synced_count}/{progress.total_count} ({progress.to_dict()['progress_percent']}%)
-**Status:** {progress.status}
-
-**Overall:**
-• Total Chats: {summary['total_chats']}
-• Completed: {summary['completed']}
-• In Progress: {summary['in_progress']}
-• Pending: {summary['pending']}
-• Failed: {summary['failed']}
-
-**Messages:** {summary['synced_messages']}/{summary['total_messages']} ({summary['progress_percent']}%)
-                """
-                progress_msg.edit_text(text.strip())
-        except Exception as e:
-            logging.debug(f"Failed to update progress message: {e}")
-
-    # Start synchronization
-    logging.info("🚀 Starting history synchronization...")
-    results = sync_manager.sync_all(progress_callback=update_progress)
-
-    # Final summary
-    summary = sync_manager.get_summary()
-    success_count = sum(1 for success in results.values() if success)
-    fail_count = sum(1 for success in results.values() if not success)
-
-    final_text = f"""
-✅ **History Sync Complete**
-
-**Results:**
-• Success: {success_count} chats
-• Failed: {fail_count} chats
-• Total Messages: {summary['synced_messages']}
-
-**Status:**
-• Completed: {summary['completed']}
-• Failed: {summary['failed']}
-• Pending: {summary['pending']}
-
-Sync checkpoint saved. You can resume anytime!
-    """
-
-    if progress_msg:
-        try:
-            progress_msg.edit_text(final_text.strip())
-        except:
-            pass
-
-    logging.info(
-        f"✅ Sync complete: {success_count} successful, {fail_count} failed, "
-        f"{summary['synced_messages']} messages indexed"
-    )
-
-    # Clean up completed chats (optional, controlled by config)
-    if SYNC_CLEAR_COMPLETED:
-        sync_manager.clear_completed()
-        logging.info("Cleared completed chats from checkpoint (SYNC_CLEAR_COMPLETED=True)")
-    else:
-        logging.info("Keeping completed chats in checkpoint to prevent re-sync on restart (SYNC_CLEAR_COMPLETED=False)")
+    logging.info("🔄 Worker thread will process chats sequentially (one at a time)")
 
 
 if __name__ == "__main__":
