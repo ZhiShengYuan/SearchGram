@@ -35,11 +35,10 @@ class SyncHTTPClient:
         self.client = httpx.Client(timeout=timeout, http2=True)
 
         # Initialize JWT authentication
-        # This client is used by the bot to call userbot API, so:
-        # - issuer: "bot" (this service)
-        # - audience: "userbot" (target service)
+        # This client is used by the bot to call userbot API
+        # Uses audience from config (e.g., "internal")
         try:
-            self.jwt_auth = load_jwt_auth_from_config(issuer="bot", audience="userbot")
+            self.jwt_auth = load_jwt_auth_from_config(issuer="bot")
             if self.jwt_auth:
                 logging.info(f"Sync HTTP client initialized with JWT auth: {self.base_url}")
             else:

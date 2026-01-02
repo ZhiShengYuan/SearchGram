@@ -136,8 +136,8 @@ class HTTPSearchEngine(BasicSearchEngine):
         # Add JWT token if available
         if self.jwt_auth:
             try:
-                # Generate token for search service
-                token = self.jwt_auth.generate_token(target_audience="search")
+                # Generate token using audience from config (e.g., "internal")
+                token = self.jwt_auth.generate_token()
                 if "headers" not in kwargs:
                     kwargs["headers"] = {}
                 kwargs["headers"]["Authorization"] = f"Bearer {token}"

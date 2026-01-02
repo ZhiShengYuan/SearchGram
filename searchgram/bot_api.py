@@ -33,11 +33,10 @@ def init_bot_api(bot_client):
     _bot_client = bot_client
 
     # Initialize JWT authentication
-    # This service receives requests from the userbot, so:
-    # - issuer: "bot" (this service)
-    # - audience: "bot" (expected in incoming tokens)
+    # This service receives requests from the userbot
+    # Uses audience from config (e.g., "internal")
     try:
-        _jwt_auth = load_jwt_auth_from_config(issuer="bot", audience="bot")
+        _jwt_auth = load_jwt_auth_from_config(issuer="bot")
         if _jwt_auth:
             logging.info("Bot API initialized with JWT authentication enabled")
         else:

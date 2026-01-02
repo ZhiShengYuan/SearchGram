@@ -32,11 +32,10 @@ def init_sync_api(sync_manager):
     _sync_manager = sync_manager
 
     # Initialize JWT authentication
-    # This service receives requests from the bot, so:
-    # - issuer: "userbot" (this service)
-    # - audience: "userbot" (expected in incoming tokens)
+    # This service receives requests from the bot
+    # Uses audience from config (e.g., "internal")
     try:
-        _jwt_auth = load_jwt_auth_from_config(issuer="userbot", audience="userbot")
+        _jwt_auth = load_jwt_auth_from_config(issuer="userbot")
         if _jwt_auth:
             logging.info("Sync API initialized with JWT authentication enabled")
         else:

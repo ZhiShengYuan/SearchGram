@@ -36,11 +36,10 @@ class BotHTTPClient:
         self.client = httpx.Client(timeout=timeout, http2=True)
 
         # Initialize JWT authentication
-        # This client is used by the userbot to call bot API, so:
-        # - issuer: "userbot" (this service)
-        # - audience: "bot" (target service)
+        # This client is used by userbot to call bot API
+        # Uses audience from config (e.g., "internal")
         try:
-            self.jwt_auth = load_jwt_auth_from_config(issuer="userbot", audience="bot")
+            self.jwt_auth = load_jwt_auth_from_config(issuer="userbot")
             if self.jwt_auth:
                 logging.info(f"Bot HTTP client initialized with JWT auth: {self.base_url}")
             else:

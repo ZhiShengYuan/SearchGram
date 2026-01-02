@@ -218,18 +218,23 @@ class JWTAuth:
         return decorator
 
 
-def load_jwt_auth_from_config(issuer: str, audience: str) -> Optional[JWTAuth]:
+def load_jwt_auth_from_config(issuer: str, audience: Optional[str] = None) -> Optional[JWTAuth]:
     """
     Load JWT authenticator from unified config.
 
     Args:
         issuer: Token issuer identifier for this service
-        audience: Expected audience for incoming tokens
+        audience: Expected audience for incoming tokens (defaults to auth.audience from config)
 
     Returns:
         JWTAuth instance or None if JWT is disabled
     """
     config = get_config()
+
+    # Use audience from config if not explicitly provided
+    if audience is None:
+        audience = config.get("auth.audience", "internal")
+        logging.debug(f"Using audience from config: {audience}")
 
     # Check if JWT is enabled
     use_jwt = config.get_bool("auth.use_jwt", False)
