@@ -134,7 +134,10 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
     """
     Dump a Telegram message as JSON (owner only).
 
-    Usage: Reply to any message with /dumpjson
+    Usage:
+    1. Reply to a message with /dumpjson - dumps the replied message
+    2. Just send /dumpjson - dumps the command message itself (includes /dumpjson text)
+
     The userbot will send the JSON dump via the bot to the owner.
     """
     import json
@@ -151,19 +154,16 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
         )
         return
 
-    # Must be a reply to a message
-    if not message.reply_to_message:
-        logging.info("Dumpjson: No reply_to_message, sending usage instructions")
-        client.send_message(
-            message.chat.id,
-            "❌ Please reply to a message with /dumpjson to dump it as JSON"
-        )
-        return
-
     try:
-        # Get the replied message
-        target_message = message.reply_to_message
-        logging.info(f"Dumpjson: Processing message {target_message.chat.id}-{target_message.id}")
+        # Determine which message to dump
+        if message.reply_to_message:
+            # If replying to a message, dump the replied message
+            target_message = message.reply_to_message
+            logging.info(f"Dumpjson: Processing replied message {target_message.chat.id}-{target_message.id}")
+        else:
+            # If not replying, dump the command message itself
+            target_message = message
+            logging.info(f"Dumpjson: Processing command message itself {target_message.chat.id}-{target_message.id}")
 
         # Convert Pyrogram Message object to dict using Pyrogram's built-in serialization
         # Use vars() or __dict__ to get all attributes, then filter serializable ones
