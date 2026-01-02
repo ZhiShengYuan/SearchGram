@@ -57,7 +57,7 @@ stats = {
 }
 
 
-@app.on_message((filters.outgoing | filters.incoming))
+@app.on_message((filters.outgoing | filters.incoming) & ~filters.command(None))
 def message_handler(client: "Client", message: "types.Message"):
     # Check if sender is the bot itself - skip to prevent circular indexing
     # Use from_user.id to check sender, not chat.id (which could be a group)
@@ -70,12 +70,6 @@ def message_handler(client: "Client", message: "types.Message"):
     # Skip service messages (no from_user)
     if not message.from_user:
         logging.debug("Skipping service message: %s-%s", message.chat.id, message.id)
-        return
-
-    # Skip bot commands (messages starting with /)
-    message_text = message.text or message.caption or ""
-    if message_text.startswith("/"):
-        logging.debug("Skipping command message: %s-%s (text: %s)", message.chat.id, message.id, message_text[:50])
         return
 
     logging.info("Adding new message: %s-%s", message.chat.id, message.id)
@@ -139,13 +133,20 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
     import json
     from .bot_http_client import BotHTTPClient
 
+    logging.info(f"Dumpjson handler triggered by user {message.from_user.id if message.from_user else 'unknown'}")
+
     # Only allow owner to use this command
     if not message.from_user or message.from_user.id != OWNER_ID:
         logging.warning(f"Unauthorized dumpjson attempt from user {message.from_user.id if message.from_user else 'unknown'}")
+        client.send_message(
+            message.chat.id,
+            f"❌ Unauthorized. Only owner (ID: {OWNER_ID}) can use this command."
+        )
         return
 
     # Must be a reply to a message
     if not message.reply_to_message:
+        logging.info("Dumpjson: No reply_to_message, sending usage instructions")
         client.send_message(
             message.chat.id,
             "❌ Please reply to a message with /dumpjson to dump it as JSON"
@@ -155,20 +156,59 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
     try:
         # Get the replied message
         target_message = message.reply_to_message
+        logging.info(f"Dumpjson: Processing message {target_message.chat.id}-{target_message.id}")
 
-        # Convert Pyrogram Message object to dict
-        # We need to use str() as default handler for non-serializable types
-        message_dict = json.loads(str(target_message))
+        # Convert Pyrogram Message object to dict using Pyrogram's built-in serialization
+        # Use vars() or __dict__ to get all attributes, then filter serializable ones
+        def serialize_message(msg):
+            """Recursively serialize a Pyrogram object to dict."""
+            if msg is None:
+                return None
+            elif isinstance(msg, (str, int, float, bool)):
+                return msg
+            elif isinstance(msg, (list, tuple)):
+                return [serialize_message(item) for item in msg]
+            elif isinstance(msg, dict):
+                return {k: serialize_message(v) for k, v in msg.items()}
+            elif hasattr(msg, '__dict__'):
+                # Pyrogram objects - serialize their __dict__
+                result = {}
+                for key, value in msg.__dict__.items():
+                    if not key.startswith('_'):  # Skip private attributes
+                        try:
+                            result[key] = serialize_message(value)
+                        except Exception as e:
+                            result[key] = f"<serialization error: {str(e)}>"
+                return result
+            else:
+                # Fallback to string representation
+                return str(msg)
+
+        message_dict = serialize_message(target_message)
 
         # Format as pretty JSON
-        json_text = json.dumps(message_dict, indent=2, ensure_ascii=False)
+        json_text = json.dumps(message_dict, indent=2, ensure_ascii=False, default=str)
         json_bytes = json_text.encode('utf-8')
 
-        logging.info(f"Dumpjson: dumping message {target_message.chat.id}-{target_message.id}, size={len(json_bytes)} bytes")
+        logging.info(f"Dumpjson: Serialized message, size={len(json_bytes)} bytes")
 
         # Send JSON file via the bot HTTP API
         bot_url = config.get("services.bot.base_url", "http://127.0.0.1:8081")
+        logging.info(f"Dumpjson: Connecting to bot API at {bot_url}")
+
         bot_client = BotHTTPClient(base_url=bot_url)
+
+        # Check if bot API is healthy
+        if not bot_client.health_check():
+            logging.error(f"Dumpjson: Bot API at {bot_url} is not healthy")
+            client.send_message(
+                message.chat.id,
+                f"❌ Bot API is not available at {bot_url}\n\nMake sure the bot process is running."
+            )
+            bot_client.close()
+            return
+
+        logging.info("Dumpjson: Bot API health check passed")
 
         # Prepare file metadata
         file_name = f"message_{target_message.chat.id}_{target_message.id}.json"
@@ -179,12 +219,16 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
             f"**Size:** {len(json_bytes):,} bytes"
         )
 
+        logging.info(f"Dumpjson: Sending file via bot API: {file_name}")
+
         # Send via bot API
         result = bot_client.send_file(
             file_bytes=json_bytes,
             file_name=file_name,
             caption=caption
         )
+
+        logging.info(f"Dumpjson: Bot API response: {result}")
 
         if result.get("success"):
             logging.info(f"Dumpjson: successfully sent JSON dump to owner via bot API, message_id={result.get('message_id')}")
@@ -203,10 +247,13 @@ def dumpjson_handler(client: "Client", message: "types.Message"):
         logging.error(f"Error in dumpjson handler: {e}")
         import traceback
         traceback.print_exc()
-        client.send_message(
-            message.chat.id,
-            f"❌ Error dumping message: {str(e)}"
-        )
+        try:
+            client.send_message(
+                message.chat.id,
+                f"❌ Error dumping message:\n\n`{str(e)}`"
+            )
+        except:
+            logging.error("Failed to send error message to user")
 
 
 def sync_history_new():
