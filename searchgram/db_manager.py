@@ -109,6 +109,43 @@ class DatabaseManager:
                     )
                 """)
 
+                # Mirror logs table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS mirror_logs (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id TEXT NOT NULL,
+                        source_chat_id INTEGER NOT NULL,
+                        source_msg_id INTEGER NOT NULL,
+                        target_chat_id INTEGER NOT NULL,
+                        target_msg_id INTEGER,
+                        has_media BOOLEAN DEFAULT 0,
+                        media_type TEXT,
+                        text_length INTEGER DEFAULT 0,
+                        llm_action TEXT,
+                        keyword_match TEXT,
+                        processing_action TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        error_message TEXT,
+                        timestamp REAL NOT NULL,
+                        processing_time_ms INTEGER DEFAULT 0,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
+                # Indexes for mirror_logs
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mirror_logs_timestamp
+                    ON mirror_logs(timestamp DESC)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mirror_logs_task_id
+                    ON mirror_logs(task_id)
+                """)
+                cursor.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_mirror_logs_source
+                    ON mirror_logs(source_chat_id, source_msg_id)
+                """)
+
                 # Initialize default settings if not exist
                 self._initialize_default_settings(cursor)
 
@@ -478,6 +515,178 @@ class DatabaseManager:
             """, (f'%{query}%', limit))
 
             return [dict(row) for row in cursor.fetchall()]
+
+    def log_mirror(self, mirror_data: Dict[str, Any]) -> int:
+        """
+        Log a mirror operation to database.
+
+        Args:
+            mirror_data: Mirror log data dictionary
+
+        Returns:
+            ID of inserted log entry
+        """
+        with self._get_cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO mirror_logs (
+                    task_id, source_chat_id, source_msg_id,
+                    target_chat_id, target_msg_id,
+                    has_media, media_type, text_length,
+                    llm_action, keyword_match, processing_action,
+                    status, error_message, timestamp, processing_time_ms
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                mirror_data.get("task_id"),
+                mirror_data.get("source_chat_id"),
+                mirror_data.get("source_msg_id"),
+                mirror_data.get("target_chat_id"),
+                mirror_data.get("target_msg_id"),
+                mirror_data.get("has_media", False),
+                mirror_data.get("media_type"),
+                mirror_data.get("text_length", 0),
+                mirror_data.get("llm_action"),
+                mirror_data.get("keyword_match"),
+                mirror_data.get("processing_action"),
+                mirror_data.get("status"),
+                mirror_data.get("error_message"),
+                mirror_data.get("timestamp", time.time()),
+                mirror_data.get("processing_time_ms", 0)
+            ))
+
+            log_id = cursor.lastrowid
+            logging.debug(f"Logged mirror #{log_id}: task={mirror_data.get('task_id')}, status={mirror_data.get('status')}")
+            return log_id
+
+    def get_recent_mirror_logs(self, limit: int = 100, task_id: Optional[str] = None) -> List[Dict]:
+        """
+        Get recent mirror logs.
+
+        Args:
+            limit: Maximum number of logs to return
+            task_id: Filter by task ID (optional)
+
+        Returns:
+            List of mirror log entries as dictionaries
+        """
+        with self._get_cursor() as cursor:
+            if task_id:
+                cursor.execute("""
+                    SELECT * FROM mirror_logs
+                    WHERE task_id = ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (task_id, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM mirror_logs
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                """, (limit,))
+
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_mirror_statistics(self, task_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get mirror operation statistics.
+
+        Args:
+            task_id: Filter by task ID (optional)
+
+        Returns:
+            Dictionary with statistics
+        """
+        with self._get_cursor() as cursor:
+            # Build WHERE clause
+            where_clause = "WHERE task_id = ?" if task_id else ""
+            params = (task_id,) if task_id else ()
+
+            # Total operations
+            cursor.execute(f"""
+                SELECT COUNT(*) as total FROM mirror_logs {where_clause}
+            """, params)
+            total = cursor.fetchone()["total"]
+
+            # Success/skipped/failed counts
+            cursor.execute(f"""
+                SELECT
+                    status,
+                    COUNT(*) as count
+                FROM mirror_logs
+                {where_clause}
+                GROUP BY status
+            """, params)
+            status_counts = {row["status"]: row["count"] for row in cursor.fetchall()}
+
+            # Processing action breakdown
+            cursor.execute(f"""
+                SELECT
+                    processing_action,
+                    COUNT(*) as count
+                FROM mirror_logs
+                {where_clause}
+                GROUP BY processing_action
+            """, params)
+            action_counts = {row["processing_action"]: row["count"] for row in cursor.fetchall()}
+
+            # Media statistics
+            cursor.execute(f"""
+                SELECT
+                    COUNT(*) as total_with_media
+                FROM mirror_logs
+                {where_clause}
+                AND has_media = 1
+            """, params)
+            total_with_media = cursor.fetchone()["total_with_media"]
+
+            # Average processing time
+            cursor.execute(f"""
+                SELECT AVG(processing_time_ms) as avg_time
+                FROM mirror_logs
+                {where_clause}
+                AND processing_time_ms > 0
+            """, params)
+            avg_time = cursor.fetchone()["avg_time"] or 0
+
+            # Last 24h operations
+            cutoff_time = time.time() - 86400
+            cursor.execute(f"""
+                SELECT COUNT(*) as count
+                FROM mirror_logs
+                {where_clause}
+                {"AND" if where_clause else "WHERE"} timestamp >= ?
+            """, params + (cutoff_time,))
+            last_24h = cursor.fetchone()["count"]
+
+            return {
+                "total_operations": total,
+                "status_counts": status_counts,
+                "action_counts": action_counts,
+                "total_with_media": total_with_media,
+                "average_processing_time_ms": round(avg_time, 2),
+                "last_24h_operations": last_24h,
+                "success_rate": round(status_counts.get("success", 0) / total * 100, 2) if total > 0 else 0
+            }
+
+    def cleanup_old_mirror_logs(self, days: int = 30) -> int:
+        """
+        Delete mirror logs older than specified days.
+
+        Args:
+            days: Number of days to keep
+
+        Returns:
+            Number of deleted logs
+        """
+        cutoff_time = time.time() - (days * 86400)
+
+        with self._get_cursor() as cursor:
+            cursor.execute("""
+                DELETE FROM mirror_logs WHERE timestamp < ?
+            """, (cutoff_time,))
+
+            deleted_count = cursor.rowcount
+            logging.info(f"Deleted {deleted_count} old mirror logs (older than {days} days)")
+            return deleted_count
 
     def close(self):
         """Close database connection."""

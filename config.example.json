@@ -19,6 +19,24 @@
     },
     "search": {
       "base_url": "http://127.0.0.1:8080"
+    },
+    "llm": {
+      "_comment": "OpenAI-compatible LLM API for mirror text processing",
+      "base_url": "https://api.openai.com/v1",
+      "api_key": "sk-your_api_key_here",
+      "model": "gpt-3.5-turbo",
+      "timeout": 30,
+      "_custom_prompts_comment": "Optional: override default prompts for different modes",
+      "custom_prompts": {
+        "rewrite": "Rewrite the following message naturally while preserving its meaning:\n\n{text}",
+        "filter": "Analyze this message and respond with ONLY 'ALLOW' or 'BLOCK':\n\n{text}",
+        "categorize": "Add relevant hashtags to this message:\n\n{text}"
+      }
+    },
+    "local_bot_api": {
+      "_comment": "Local Telegram Bot API server for large file uploads (>50MB). Use standard Pyrogram if not configured.",
+      "base_url": "http://localhost:8081/bot{token}",
+      "_setup_comment": "See https://github.com/tdlib/telegram-bot-api for setup instructions"
     }
   },
   "auth": {
@@ -133,5 +151,31 @@
     "_clear_completed_comment": "If false (recommended), keeps completed chats in checkpoint to prevent re-sync on restart. If true, removes them after sync completes.",
     "chats": [],
     "_api_comment": "Sync API runs on userbot HTTP service (http.userbot_port). Bot sends sync commands to services.userbot.base_url."
+  },
+  "mirror": {
+    "_comment": "Channel mirroring: userbot downloads from source, bot processes with LLM/filters and uploads to target",
+    "enabled": false,
+    "tasks": [],
+    "_tasks_example": [
+      {
+        "id": "crypto_news",
+        "source_channel": -1001234567890,
+        "target_channel": -1009876543210,
+        "mirror_media": true,
+        "mirror_text": true,
+        "forward_mode": false,
+        "llm_enabled": true,
+        "llm_mode": "rewrite",
+        "llm_temperature": 0.7,
+        "llm_max_tokens": null,
+        "llm_custom_prompt": null,
+        "keyword_whitelist": ["bitcoin", "ethereum", "crypto"],
+        "keyword_blacklist": ["scam", "spam"],
+        "keyword_case_sensitive": false,
+        "keyword_use_regex": false
+      }
+    ],
+    "_llm_modes": ["rewrite", "filter", "categorize", "disabled"],
+    "_forward_mode_comment": "If true, forwards messages (shows 'Forwarded from'). If false, copies content as new message"
   }
 }
