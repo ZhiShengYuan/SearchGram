@@ -129,7 +129,7 @@ def deleted_messages_handler(client: "Client", messages: list["types.Message"]):
             logging.error(f"Failed to soft-delete message {message.chat.id}-{message.id}: {e}")
 
 
-@app.on_message(filters.command(["dumpjson"]))
+@app.on_message(filters.text & filters.regex(r"^/dumpjson(?:\s|$)"))
 def dumpjson_handler(client: "Client", message: "types.Message"):
     """
     Dump a Telegram message as JSON (owner only).
