@@ -16,7 +16,7 @@ from pyrogram import Client, filters, types
 
 from . import SearchEngine
 from .buffered_engine import BufferedSearchEngine
-from .config_loader import BOT_ID, SYNC_ENABLED, SYNC_CLEAR_COMPLETED, get_config
+from .config_loader import BOT_ID, OWNER_ID, SYNC_ENABLED, SYNC_CLEAR_COMPLETED, get_config
 from .init_client import get_client
 from .sync_api import init_sync_api, run_sync_api
 from .sync_manager import SyncManager
@@ -126,6 +126,87 @@ def deleted_messages_handler(client: "Client", messages: list["types.Message"]):
             tgdb.soft_delete_message(message.chat.id, message.id)
         except Exception as e:
             logging.error(f"Failed to soft-delete message {message.chat.id}-{message.id}: {e}")
+
+
+@app.on_message(filters.command(["dumpjson"]) & filters.private)
+def dumpjson_handler(client: "Client", message: "types.Message"):
+    """
+    Dump a Telegram message as JSON (owner only).
+
+    Usage: Reply to any message with /dumpjson
+    The userbot will send the JSON dump via the bot to the owner.
+    """
+    import json
+    from .bot_http_client import BotHTTPClient
+
+    # Only allow owner to use this command
+    if not message.from_user or message.from_user.id != OWNER_ID:
+        logging.warning(f"Unauthorized dumpjson attempt from user {message.from_user.id if message.from_user else 'unknown'}")
+        return
+
+    # Must be a reply to a message
+    if not message.reply_to_message:
+        client.send_message(
+            message.chat.id,
+            "❌ Please reply to a message with /dumpjson to dump it as JSON"
+        )
+        return
+
+    try:
+        # Get the replied message
+        target_message = message.reply_to_message
+
+        # Convert Pyrogram Message object to dict
+        # We need to use str() as default handler for non-serializable types
+        message_dict = json.loads(str(target_message))
+
+        # Format as pretty JSON
+        json_text = json.dumps(message_dict, indent=2, ensure_ascii=False)
+        json_bytes = json_text.encode('utf-8')
+
+        logging.info(f"Dumpjson: dumping message {target_message.chat.id}-{target_message.id}, size={len(json_bytes)} bytes")
+
+        # Send JSON file via the bot HTTP API
+        bot_url = config.get("services.bot.base_url", "http://127.0.0.1:8081")
+        bot_client = BotHTTPClient(base_url=bot_url)
+
+        # Prepare file metadata
+        file_name = f"message_{target_message.chat.id}_{target_message.id}.json"
+        caption = (
+            f"📋 **Message JSON Dump**\n\n"
+            f"**Chat ID:** `{target_message.chat.id}`\n"
+            f"**Message ID:** `{target_message.id}`\n"
+            f"**Size:** {len(json_bytes):,} bytes"
+        )
+
+        # Send via bot API
+        result = bot_client.send_file(
+            file_bytes=json_bytes,
+            file_name=file_name,
+            caption=caption
+        )
+
+        if result.get("success"):
+            logging.info(f"Dumpjson: successfully sent JSON dump to owner via bot API, message_id={result.get('message_id')}")
+
+            # Send confirmation to userbot chat
+            client.send_message(
+                message.chat.id,
+                f"✅ JSON dump sent via bot!\n\n**Size:** {len(json_bytes):,} bytes\n**Message ID:** {result.get('message_id')}"
+            )
+        else:
+            raise Exception(f"Bot API returned error: {result}")
+
+        bot_client.close()
+
+    except Exception as e:
+        logging.error(f"Error in dumpjson handler: {e}")
+        import traceback
+        traceback.print_exc()
+        client.send_message(
+            message.chat.id,
+            f"❌ Error dumping message: {str(e)}"
+        )
 
 
 def sync_history_new():

@@ -1576,4 +1576,23 @@ async def sync_list_handler(client: "Client", message: "types.Message"):
 
 
 if __name__ == "__main__":
+    import threading
+    from .bot_api import init_bot_api, run_bot_api
+
+    # Initialize bot API with bot client
+    init_bot_api(app)
+
+    # Get bot HTTP API configuration
+    bot_host = config.get("http.listen", "127.0.0.1")
+    bot_port = config.get_int("http.bot_port", 8081)
+
+    # Start bot HTTP API server in background thread
+    logging.info(f"Starting bot HTTP API server on {bot_host}:{bot_port}")
+    threading.Thread(
+        target=run_bot_api,
+        args=(bot_host, bot_port),
+        daemon=True
+    ).start()
+
+    # Run the bot
     app.run()
