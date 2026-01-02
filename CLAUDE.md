@@ -421,16 +421,22 @@ Alias for `/sync_status`.
    ```
 3. **Userbot API handler**:
    - Receives HTTP request on port 8082
-   - Calls `sync_manager.add_chat(chat_id)`
-   - Starts sync in background thread
-   - Returns JSON response
-4. **Userbot provides real-time status** via GET endpoint:
+   - Calls `sync_manager.add_chat(chat_id)` to add to queue
+   - Returns JSON response immediately
+   - **Worker thread** picks up the chat from queue and syncs it
+4. **Worker thread processes queue sequentially**:
+   - Continuously monitors queue for pending chats
+   - Syncs one chat at a time (prevents rate limiting)
+   - Automatically moves to next chat when current one completes
+5. **Userbot provides real-time status** via GET endpoint:
    ```http
    GET http://userbot-server:8082/api/v1/sync/status
 
    Response:
    {
      "timestamp": "2026-01-01T00:00:00",
+     "worker_running": true,
+     "current_sync_chat_id": -1001234567890,
      "chats": [{
        "chat_id": -1001234567890,
        "status": "in_progress",
@@ -441,7 +447,7 @@ Alias for `/sync_status`.
      }]
    }
    ```
-5. **Bot queries status** when user runs `/sync_status`
+6. **Bot queries status** when user runs `/sync_status`
 
 ### Features
 
@@ -459,6 +465,12 @@ Alias for `/sync_status`.
 - HTTP requests processed in Flask threads
 - Lock-based synchronization in SyncManager
 - Status queries don't block sync operations
+
+**Sequential Processing Queue:**
+- **Only one chat synced at a time** to avoid Telegram rate limits
+- Background worker thread processes queue sequentially
+- Automatic queue management (FIFO - First In First Out)
+- Worker thread starts automatically when client starts
 
 **Batch Processing:**
 - Configurable batch size (default: 100 messages)
@@ -520,9 +532,10 @@ Ensure firewall allows connection from bot server to client server port 8082.
 - Wait for cooldown → resume with `/sync_resume`
 
 **Multiple Chats:**
-- Queue multiple chats
-- Process in parallel threads
+- Queue multiple chats at once
+- Processed **sequentially** (one at a time) to avoid rate limits
 - Monitor all with single status command
+- View which chat is currently being synced in real-time
 
 ### Implementation Files
 

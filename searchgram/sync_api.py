@@ -155,17 +155,11 @@ def add_sync():
         added = _sync_manager.add_chat(chat_id)
 
         if added:
-            # Start sync in background thread
-            threading.Thread(
-                target=_sync_manager.sync_chat,
-                args=(chat_id,),
-                daemon=True
-            ).start()
-
+            # Worker thread will pick it up automatically
             return jsonify({
                 "success": True,
                 "chat_id": chat_id,
-                "message": "Chat added to sync queue and sync started"
+                "message": "Chat added to sync queue (will be processed sequentially)"
             })
         else:
             # Already in queue
@@ -226,6 +220,8 @@ def get_sync_status():
 
             return jsonify({
                 "timestamp": datetime.utcnow().isoformat(),
+                "current_sync_chat_id": _sync_manager.get_current_sync_chat(),
+                "worker_running": _sync_manager.is_worker_running(),
                 "chats": [progress.to_dict()]
             })
         else:
@@ -233,6 +229,8 @@ def get_sync_status():
             all_progress = _sync_manager.get_all_progress()
             return jsonify({
                 "timestamp": datetime.utcnow().isoformat(),
+                "current_sync_chat_id": _sync_manager.get_current_sync_chat(),
+                "worker_running": _sync_manager.is_worker_running(),
                 "chats": [p.to_dict() for p in all_progress]
             })
 
@@ -324,17 +322,11 @@ def resume_sync():
         success = _sync_manager.resume_chat(chat_id)
 
         if success:
-            # Start sync in background thread
-            threading.Thread(
-                target=_sync_manager.sync_chat,
-                args=(chat_id,),
-                daemon=True
-            ).start()
-
+            # Worker thread will pick it up automatically
             return jsonify({
                 "success": True,
                 "chat_id": chat_id,
-                "message": "Sync resumed from last checkpoint"
+                "message": "Sync resumed from last checkpoint (will be processed sequentially)"
             })
         else:
             return jsonify({

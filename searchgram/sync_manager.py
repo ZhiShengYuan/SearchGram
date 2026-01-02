@@ -85,6 +85,7 @@ class SyncManager:
     - Error handling with retry logic
     - FloodWait handling
     - Progress persistence to JSON
+    - Sequential processing queue (only one chat synced at a time)
     """
 
     def __init__(self, client: Client, search_engine, checkpoint_file: str = None):
@@ -94,6 +95,11 @@ class SyncManager:
         self.progress_map: Dict[int, SyncProgress] = {}
         self.lock = threading.Lock()
         self._load_checkpoint()
+
+        # Worker thread for sequential processing
+        self._running = False
+        self._worker_thread: Optional[threading.Thread] = None
+        self._current_sync_chat_id: Optional[int] = None
 
     def _load_checkpoint(self):
         """Load progress from checkpoint file."""
@@ -490,6 +496,80 @@ class SyncManager:
                 "synced_messages": synced_messages,
                 "progress_percent": round((synced_messages / total_messages * 100) if total_messages > 0 else 0, 2)
             }
+
+    def _sync_worker(self):
+        """
+        Worker thread that processes the sync queue sequentially.
+        Only one chat is synced at a time to avoid rate limiting.
+        """
+        logging.info("Sync worker thread started")
+
+        while self._running:
+            try:
+                # Find next pending chat to sync
+                next_chat_id = None
+
+                with self.lock:
+                    for chat_id, progress in self.progress_map.items():
+                        if progress.status == "pending":
+                            next_chat_id = chat_id
+                            break
+
+                if next_chat_id:
+                    # Sync this chat
+                    logging.info(f"Worker thread starting sync for chat {next_chat_id}")
+                    self._current_sync_chat_id = next_chat_id
+
+                    try:
+                        self.sync_chat(next_chat_id)
+                    except Exception as e:
+                        logging.error(f"Worker thread error syncing chat {next_chat_id}: {e}")
+
+                    self._current_sync_chat_id = None
+                else:
+                    # No pending chats, sleep for a bit
+                    time.sleep(1)
+
+            except Exception as e:
+                logging.error(f"Sync worker thread error: {e}")
+                time.sleep(5)  # Sleep longer on error
+
+        logging.info("Sync worker thread stopped")
+
+    def start_worker(self):
+        """Start the background worker thread for sequential sync processing."""
+        if self._running:
+            logging.warning("Sync worker already running")
+            return
+
+        self._running = True
+        self._worker_thread = threading.Thread(target=self._sync_worker, daemon=True, name="SyncWorker")
+        self._worker_thread.start()
+        logging.info("Sync worker thread started successfully")
+
+    def stop_worker(self):
+        """Stop the background worker thread."""
+        if not self._running:
+            logging.warning("Sync worker not running")
+            return
+
+        logging.info("Stopping sync worker thread...")
+        self._running = False
+
+        if self._worker_thread:
+            self._worker_thread.join(timeout=10)
+            if self._worker_thread.is_alive():
+                logging.warning("Sync worker thread did not stop gracefully")
+            else:
+                logging.info("Sync worker thread stopped successfully")
+
+    def is_worker_running(self) -> bool:
+        """Check if the worker thread is running."""
+        return self._running and self._worker_thread and self._worker_thread.is_alive()
+
+    def get_current_sync_chat(self) -> Optional[int]:
+        """Get the chat ID currently being synced, if any."""
+        return self._current_sync_chat_id
 
 
 if __name__ == "__main__":

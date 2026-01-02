@@ -48,6 +48,10 @@ sync_manager = SyncManager(app, tgdb)
 # Initialize sync API
 init_sync_api(sync_manager)
 
+# Start the worker thread for sequential sync processing
+sync_manager.start_worker()
+logging.info("Sync worker thread started - will process chats sequentially")
+
 # Statistics tracking
 stats = {
     "indexed": 0,
@@ -376,8 +380,12 @@ if __name__ == "__main__":
     try:
         app.run()
     finally:
+        # Stop the sync worker thread
+        logging.info("Client shutting down, stopping sync worker...")
+        sync_manager.stop_worker()
+
         # Ensure all buffered messages are flushed before exit
-        logging.info("Client shutting down, flushing remaining messages...")
+        logging.info("Flushing remaining messages...")
         tgdb.flush()
         tgdb.shutdown()
         logging.info("All messages flushed, safe to exit")

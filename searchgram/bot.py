@@ -1387,7 +1387,20 @@ async def sync_status_handler(client: "Client", message: "types.Message"):
 
         # Format status message
         response = "📊 **Sync Status**\n\n"
-        response += f"Last Updated: `{status.get('timestamp', 'Unknown')}`\n\n"
+        response += f"Last Updated: `{status.get('timestamp', 'Unknown')}`\n"
+
+        # Show worker status and current sync
+        worker_running = status.get("worker_running", False)
+        current_sync = status.get("current_sync_chat_id")
+
+        if worker_running:
+            response += "Worker: ✅ Running\n"
+            if current_sync:
+                response += f"Currently Syncing: `{current_sync}`\n"
+        else:
+            response += "Worker: ❌ Stopped\n"
+
+        response += "\n"
 
         chats = status.get("chats", [])
         for chat_data in chats:
