@@ -57,7 +57,7 @@ stats = {
 }
 
 
-@app.on_message((filters.outgoing | filters.incoming) & ~filters.command(None))
+@app.on_message(filters.outgoing | filters.incoming, group=1)
 def message_handler(client: "Client", message: "types.Message"):
     # Check if sender is the bot itself - skip to prevent circular indexing
     # Use from_user.id to check sender, not chat.id (which could be a group)
@@ -70,6 +70,13 @@ def message_handler(client: "Client", message: "types.Message"):
     # Skip service messages (no from_user)
     if not message.from_user:
         logging.debug("Skipping service message: %s-%s", message.chat.id, message.id)
+        return
+
+    # Skip bot commands (messages starting with /)
+    # Command handlers are in group 0, so they will be processed before this handler
+    message_text = message.text or message.caption or ""
+    if message_text.startswith("/"):
+        logging.debug("Skipping command message for indexing: %s-%s (text: %s)", message.chat.id, message.id, message_text[:50])
         return
 
     logging.info("Adding new message: %s-%s", message.chat.id, message.id)
