@@ -504,6 +504,21 @@ class SyncManager:
         """
         logging.info("Sync worker thread started")
 
+        # Wait for the Pyrogram client to be connected before processing
+        # This prevents "Client has not been started yet" errors
+        client_ready = False
+        while self._running and not client_ready:
+            try:
+                if self.client.is_connected:
+                    client_ready = True
+                    logging.info("Pyrogram client is ready, worker thread can start processing")
+                else:
+                    logging.debug("Waiting for Pyrogram client to connect...")
+                    time.sleep(1)
+            except Exception as e:
+                logging.debug(f"Client readiness check error (will retry): {e}")
+                time.sleep(1)
+
         while self._running:
             try:
                 # Find next pending chat to sync
