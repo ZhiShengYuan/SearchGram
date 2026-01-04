@@ -71,7 +71,7 @@ not_command = filters.create(not_command_filter)
 db_manager = get_db_manager(DATABASE_PATH) if DATABASE_ENABLED else None
 chat_types = [i for i in dir(enums.ChatType) if not i.startswith("_")]
 parser = argparse.ArgumentParser()
-parser.add_argument("keyword", help="the keyword to be searched")
+parser.add_argument("keyword", nargs='*', help="the keyword to be searched (can contain spaces)")
 parser.add_argument("-t", "--type", help="the type of message", default=None)
 parser.add_argument("-u", "--user", help="the user who sent the message", default=None)
 parser.add_argument("-m", "--mode", help="match mode, e: exact match, other value is fuzzy search", default=None)
@@ -712,7 +712,7 @@ def parse_and_search(text, page=1, requester_info=None, chat_id=None, apply_priv
     args = parser.parse_args(text.split())
     _type = args.type
     user = args.user
-    keyword = args.keyword
+    keyword = ' '.join(args.keyword) if args.keyword else ""
     mode = args.mode
     logging.info("Search keyword: %s, type: %s, user: %s, page: %s, mode: %s, chat_id: %s, privacy_filter: %s",
                  keyword, _type, user, page, mode, chat_id, apply_privacy_filter)

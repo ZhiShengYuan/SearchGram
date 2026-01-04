@@ -13,23 +13,53 @@ class TestParser(unittest.TestCase):
     def test_simple(self):
         t1 = "message"
         args = parser.parse_args(t1.split())
-        self.assertEqual(args.message, "message")
+        self.assertEqual(args.keyword, ["message"])
 
     def test_type(self):
         t1 = "--type=GROUP message"
         args = parser.parse_args(t1.split())
         self.assertEqual(args.type, "GROUP")
-        self.assertEqual(args.message, "message")
+        self.assertEqual(args.keyword, ["message"])
 
     def test_user(self):
         t2 = "--user=12345 message"
         args = parser.parse_args(t2.split())
         self.assertEqual(args.user, "12345")
-        self.assertEqual(args.message, "message")
+        self.assertEqual(args.keyword, ["message"])
 
     def test_type_and_user(self):
         t3 = "--type=GROUP --user=username message"
         args = parser.parse_args(t3.split())
         self.assertEqual(args.type, "GROUP")
         self.assertEqual(args.user, "username")
-        self.assertEqual(args.message, "message")
+        self.assertEqual(args.keyword, ["message"])
+
+    def test_multi_word_keyword(self):
+        """Test that keywords with spaces are properly handled"""
+        t1 = "Explorer Professional Recovery"
+        args = parser.parse_args(t1.split())
+        self.assertEqual(args.keyword, ["Explorer", "Professional", "Recovery"])
+        # Test joined keyword
+        keyword = ' '.join(args.keyword) if args.keyword else ""
+        self.assertEqual(keyword, "Explorer Professional Recovery")
+
+    def test_multi_word_with_filters(self):
+        """Test multi-word keywords with type and user filters"""
+        t1 = "-t=GROUP -u=username Explorer Professional Recovery"
+        args = parser.parse_args(t1.split())
+        self.assertEqual(args.type, "GROUP")
+        self.assertEqual(args.user, "username")
+        self.assertEqual(args.keyword, ["Explorer", "Professional", "Recovery"])
+        # Test joined keyword
+        keyword = ' '.join(args.keyword) if args.keyword else ""
+        self.assertEqual(keyword, "Explorer Professional Recovery")
+
+    def test_empty_keyword(self):
+        """Test empty keyword with filters"""
+        t1 = "-t=GROUP"
+        args = parser.parse_args(t1.split())
+        self.assertEqual(args.type, "GROUP")
+        self.assertEqual(args.keyword, [])
+        # Test joined keyword
+        keyword = ' '.join(args.keyword) if args.keyword else ""
+        self.assertEqual(keyword, "")
