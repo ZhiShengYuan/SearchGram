@@ -11,7 +11,7 @@ import logging
 import time
 from typing import Optional
 from flask import request, jsonify
-from .jwt_auth import require_jwt_auth
+from .bot_api import require_jwt_auth
 from .mirror_models import (
     MirrorMessage, MirrorLog, MirrorTask, ProcessingAction, MediaType
 )
