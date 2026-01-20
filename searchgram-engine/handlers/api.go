@@ -4,10 +4,16 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/host"
+	"github.com/shirou/gopsutil/v3/load"
+	"github.com/shirou/gopsutil/v3/mem"
 	log "github.com/sirupsen/logrus"
 	"github.com/zhishengyuan/searchgram-engine/engines"
 	"github.com/zhishengyuan/searchgram-engine/models"
@@ -440,4 +446,136 @@ func (h *APIHandler) UserStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, result)
+}
+
+// SystemInfo handles system information requests
+// GET /api/v1/health/system
+func (h *APIHandler) SystemInfo(c *gin.Context) {
+	// Gather system information
+	hostname, _ := os.Hostname()
+
+	// Get memory stats
+	memInfo, err := mem.VirtualMemory()
+	if err != nil {
+		log.WithError(err).Error("Failed to get memory info")
+	}
+
+	swapInfo, err := mem.SwapMemory()
+	if err != nil {
+		log.WithError(err).Error("Failed to get swap info")
+	}
+
+	// Get CPU stats
+	cpuPercent, err := cpu.Percent(time.Second, false)
+	if err != nil {
+		log.WithError(err).Error("Failed to get CPU usage")
+	}
+	cpuUsage := 0.0
+	if len(cpuPercent) > 0 {
+		cpuUsage = cpuPercent[0]
+	}
+
+	cpuCounts, _ := cpu.Counts(true)  // logical cores
+	cpuCountsPhysical, _ := cpu.Counts(false) // physical cores
+
+	// Get load average
+	loadAvg, err := load.Avg()
+	loadAvgData := map[string]float64{
+		"1min":  0,
+		"5min":  0,
+		"15min": 0,
+	}
+	if err == nil && loadAvg != nil {
+		loadAvgData["1min"] = loadAvg.Load1
+		loadAvgData["5min"] = loadAvg.Load5
+		loadAvgData["15min"] = loadAvg.Load15
+	}
+
+	// Get disk stats (root partition)
+	diskInfo, err := disk.Usage("/")
+	if err != nil {
+		log.WithError(err).Error("Failed to get disk info")
+	}
+
+	// Get host info (uptime, OS, etc.)
+	hostInfo, err := host.Info()
+	if err != nil {
+		log.WithError(err).Error("Failed to get host info")
+	}
+
+	// Calculate uptime
+	uptimeSeconds := int64(0)
+	uptimeFormatted := "unknown"
+	if hostInfo != nil {
+		uptimeSeconds = int64(hostInfo.Uptime)
+		uptimeFormatted = formatDuration(time.Duration(uptimeSeconds) * time.Second)
+	}
+
+	// Build response
+	response := gin.H{
+		"service":   "search",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"system": gin.H{
+			"cpu": gin.H{
+				"usage_percent":  round(cpuUsage, 2),
+				"count_logical":  cpuCounts,
+				"count_physical": cpuCountsPhysical,
+				"load_average":   loadAvgData,
+			},
+			"memory": gin.H{
+				"total_gb":     round(float64(memInfo.Total)/(1024*1024*1024), 2),
+				"used_gb":      round(float64(memInfo.Used)/(1024*1024*1024), 2),
+				"available_gb": round(float64(memInfo.Available)/(1024*1024*1024), 2),
+				"percent":      round(memInfo.UsedPercent, 2),
+				"swap_total_gb": round(float64(swapInfo.Total)/(1024*1024*1024), 2),
+				"swap_used_gb":  round(float64(swapInfo.Used)/(1024*1024*1024), 2),
+				"swap_percent":  round(swapInfo.UsedPercent, 2),
+			},
+			"disk": gin.H{
+				"total_gb": round(float64(diskInfo.Total)/(1024*1024*1024), 2),
+				"used_gb":  round(float64(diskInfo.Used)/(1024*1024*1024), 2),
+				"free_gb":  round(float64(diskInfo.Free)/(1024*1024*1024), 2),
+				"percent":  round(diskInfo.UsedPercent, 2),
+			},
+			"uptime": gin.H{
+				"seconds":   uptimeSeconds,
+				"formatted": uptimeFormatted,
+			},
+			"os": gin.H{
+				"system":    runtime.GOOS,
+				"hostname":  hostname,
+				"platform":  hostInfo.Platform,
+				"release":   hostInfo.PlatformVersion,
+				"machine":   runtime.GOARCH,
+			},
+		},
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// Helper function to round float64 to specified decimal places
+func round(val float64, precision int) float64 {
+	ratio := float64(1)
+	for i := 0; i < precision; i++ {
+		ratio *= 10
+	}
+	return float64(int(val*ratio)) / ratio
+}
+
+// Helper function to format duration into human-readable string
+func formatDuration(d time.Duration) string {
+	days := int(d.Hours() / 24)
+	hours := int(d.Hours()) % 24
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+
+	if days > 0 {
+		return fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
+	} else if hours > 0 {
+		return fmt.Sprintf("%dh %dm %ds", hours, minutes, seconds)
+	} else if minutes > 0 {
+		return fmt.Sprintf("%dm %ds", minutes, seconds)
+	}
+	return fmt.Sprintf("%ds", seconds)
 }

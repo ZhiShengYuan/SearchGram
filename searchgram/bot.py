@@ -268,6 +268,70 @@ async def ping_handler(client: "Client", message: "types.Message"):
     await auto_delete_in_groups(client, message, sent_msg)
 
 
+@app.on_message(filters.command(["status"]))
+@require_owner
+async def status_handler(client: "Client", message: "types.Message"):
+    """
+    Display comprehensive system status from all 3 services (owner only).
+    Shows CPU, memory, disk, load average, and uptime for:
+    - Bot service (local)
+    - Userbot/Client service
+    - Search service
+    """
+    await client.send_chat_action(message.chat.id, enums.ChatAction.TYPING)
+
+    from .sysinfo import get_system_info, format_system_info
+
+    # Prepare status sections
+    status_sections = []
+
+    # 1. Get local (bot) system info
+    try:
+        bot_info = get_system_info()
+        bot_status = format_system_info(bot_info, "Bot Service")
+        status_sections.append(bot_status)
+    except Exception as e:
+        logging.error(f"Failed to get bot system info: {e}")
+        status_sections.append(f"**Bot Service**\n❌ Error: {str(e)}")
+
+    # 2. Get userbot/client system info via HTTP API
+    try:
+        userbot_response = sync_client.get_system_info()
+        if userbot_response and "system" in userbot_response:
+            userbot_info = userbot_response["system"]
+            userbot_status = format_system_info(userbot_info, "Userbot/Client Service")
+            status_sections.append(userbot_status)
+        else:
+            status_sections.append("**Userbot/Client Service**\n❌ Service unavailable or no response")
+    except Exception as e:
+        logging.error(f"Failed to get userbot system info: {e}")
+        status_sections.append(f"**Userbot/Client Service**\n❌ Error: {str(e)}")
+
+    # 3. Get search service system info via HTTP API
+    try:
+        if hasattr(tgdb, 'get_system_info'):
+            search_response = tgdb.get_system_info()
+            if search_response and "system" in search_response:
+                search_info = search_response["system"]
+                search_status = format_system_info(search_info, "Search Service")
+                status_sections.append(search_status)
+            else:
+                status_sections.append("**Search Service**\n❌ Service unavailable or no response")
+        else:
+            status_sections.append("**Search Service**\n❌ System info not supported by current engine")
+    except Exception as e:
+        logging.error(f"Failed to get search service system info: {e}")
+        status_sections.append(f"**Search Service**\n❌ Error: {str(e)}")
+
+    # Combine all sections
+    header = "🖥️ **System Status Report**\n" + "="*40 + "\n\n"
+    separator = "\n\n" + "-"*40 + "\n\n"
+    text = header + separator.join(status_sections)
+
+    sent_msg = await client.send_message(message.chat.id, text, parse_mode=enums.ParseMode.MARKDOWN)
+    await auto_delete_in_groups(client, message, sent_msg)
+
+
 @app.on_message(filters.command(["clean_commands"]))
 @require_owner
 def clean_commands_handler(client: "Client", message: "types.Message"):

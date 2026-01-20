@@ -15,6 +15,7 @@ from flask import Flask, jsonify, request
 
 from .config_loader import get_config
 from .jwt_auth import load_jwt_auth_from_config
+from .sysinfo import get_system_info
 
 # Flask app for sync API
 app = Flask(__name__)
@@ -118,6 +119,39 @@ def health():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat()
     })
+
+
+@app.route('/api/v1/health/system', methods=['GET'])
+@require_jwt_auth(allowed_issuers=["bot", "userbot", "search"])
+def system_info():
+    """
+    Get system information for the userbot host.
+
+    Response:
+    {
+        "service": "userbot",
+        "timestamp": "2026-01-01T00:00:00",
+        "system": {
+            "cpu": {...},
+            "memory": {...},
+            "disk": {...},
+            "uptime": {...},
+            "os": {...}
+        }
+    }
+
+    Authentication: Requires JWT with issuer "bot", "userbot", or "search"
+    """
+    try:
+        sysinfo = get_system_info()
+        return jsonify({
+            "service": "userbot",
+            "timestamp": datetime.utcnow().isoformat(),
+            "system": sysinfo
+        })
+    except Exception as e:
+        logging.error(f"Error getting system info: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/v1/sync', methods=['POST'])

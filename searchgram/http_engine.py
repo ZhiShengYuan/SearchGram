@@ -479,6 +479,24 @@ class HTTPSearchEngine(BasicSearchEngine):
 
         return result
 
+    def get_system_info(self) -> Optional[Dict[str, Any]]:
+        """
+        Get system information from the search service.
+
+        Returns:
+            Dictionary with system info or None on failure:
+            - service: str
+            - timestamp: str
+            - system: dict with cpu, memory, disk, uptime, os info
+        """
+        try:
+            result = self._make_request("GET", "/api/v1/health/system")
+            logging.debug("Successfully retrieved search service system info")
+            return result
+        except Exception as e:
+            logging.error(f"Failed to get search service system info: {e}")
+            return None
+
 
 # Factory function for compatibility
 def SearchEngine(*args, **kwargs) -> HTTPSearchEngine:

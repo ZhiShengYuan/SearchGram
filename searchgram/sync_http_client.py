@@ -155,6 +155,25 @@ class SyncHTTPClient:
         response.raise_for_status()
         return response.json()
 
+    def get_system_info(self) -> Optional[Dict]:
+        """
+        Get system information from userbot service.
+
+        Returns:
+            Response dict with system info or None on failure
+
+        Raises:
+            httpx.HTTPError: On request failure
+        """
+        try:
+            url = f"{self.base_url}/api/v1/health/system"
+            response = self.client.get(url, headers=self._get_headers())
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logging.error(f"Failed to get userbot system info: {e}")
+            return None
+
     def health_check(self) -> bool:
         """
         Check if sync API server is healthy.

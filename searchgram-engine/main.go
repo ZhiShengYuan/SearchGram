@@ -146,6 +146,7 @@ func main() {
 		v1.GET("/ping", apiHandler.Ping)
 		v1.GET("/stats", apiHandler.Stats)
 		v1.GET("/status", apiHandler.Status)
+		v1.GET("/health/system", apiHandler.SystemInfo)
 		v1.POST("/stats/user", apiHandler.UserStats)
 	}
 
