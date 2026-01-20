@@ -451,9 +451,6 @@ func (h *APIHandler) UserStats(c *gin.Context) {
 // SystemInfo handles system information requests
 // GET /api/v1/health/system
 func (h *APIHandler) SystemInfo(c *gin.Context) {
-	// Gather system information
-	hostname, _ := os.Hostname()
-
 	// Get memory stats
 	memInfo, err := mem.VirtualMemory()
 	if err != nil {
@@ -477,6 +474,13 @@ func (h *APIHandler) SystemInfo(c *gin.Context) {
 
 	cpuCounts, _ := cpu.Counts(true)  // logical cores
 	cpuCountsPhysical, _ := cpu.Counts(false) // physical cores
+
+	// Get CPU model/info
+	cpuModel := "Unknown"
+	cpuInfos, err := cpu.Info()
+	if err == nil && len(cpuInfos) > 0 {
+		cpuModel = cpuInfos[0].ModelName
+	}
 
 	// Get load average
 	loadAvg, err := load.Avg()
@@ -517,6 +521,7 @@ func (h *APIHandler) SystemInfo(c *gin.Context) {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"system": gin.H{
 			"cpu": gin.H{
+				"model":          cpuModel,
 				"usage_percent":  round(cpuUsage, 2),
 				"count_logical":  cpuCounts,
 				"count_physical": cpuCountsPhysical,
@@ -542,11 +547,10 @@ func (h *APIHandler) SystemInfo(c *gin.Context) {
 				"formatted": uptimeFormatted,
 			},
 			"os": gin.H{
-				"system":    runtime.GOOS,
-				"hostname":  hostname,
-				"platform":  hostInfo.Platform,
-				"release":   hostInfo.PlatformVersion,
-				"machine":   runtime.GOARCH,
+				"system":   runtime.GOOS,
+				"platform": hostInfo.Platform,
+				"release":  hostInfo.PlatformVersion,
+				"machine":  runtime.GOARCH,
 			},
 		},
 	}

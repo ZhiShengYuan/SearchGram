@@ -6,8 +6,36 @@ Provides unified system stats across all Python services.
 import psutil
 import platform
 import time
+import re
 from datetime import timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+
+
+def get_cpu_model() -> str:
+    """
+    Get CPU model name from /proc/cpuinfo on Linux.
+    Falls back to platform.processor() on other systems.
+
+    Returns:
+        CPU model name or 'Unknown'
+    """
+    try:
+        # Try Linux /proc/cpuinfo first
+        with open('/proc/cpuinfo', 'r') as f:
+            for line in f:
+                if line.strip().startswith('model name'):
+                    # Extract model name after the colon
+                    model = line.split(':', 1)[1].strip()
+                    return model
+    except (FileNotFoundError, IOError):
+        pass
+
+    # Fallback to platform.processor()
+    processor = platform.processor()
+    if processor:
+        return processor
+
+    return 'Unknown'
 
 
 def get_system_info() -> Dict[str, Any]:
@@ -26,6 +54,7 @@ def get_system_info() -> Dict[str, Any]:
     cpu_percent = psutil.cpu_percent(interval=1)
     cpu_count = psutil.cpu_count(logical=True)
     cpu_count_physical = psutil.cpu_count(logical=False)
+    cpu_model = get_cpu_model()
     load_avg = psutil.getloadavg() if hasattr(psutil, 'getloadavg') else (0, 0, 0)
 
     # Memory information
@@ -45,13 +74,12 @@ def get_system_info() -> Dict[str, Any]:
         'system': platform.system(),
         'release': platform.release(),
         'version': platform.version(),
-        'machine': platform.machine(),
-        'processor': platform.processor() or 'unknown',
-        'hostname': platform.node()
+        'machine': platform.machine()
     }
 
     return {
         'cpu': {
+            'model': cpu_model,
             'usage_percent': cpu_percent,
             'count_logical': cpu_count,
             'count_physical': cpu_count_physical,
@@ -102,11 +130,12 @@ def format_system_info(info: Dict[str, Any], service_name: str = "System") -> st
     os = info['os']
 
     lines = [
-        f"**{service_name}** ({os['hostname']})",
+        f"**{service_name}**",
         f"OS: {os['system']} {os['release']} ({os['machine']})",
         f"Uptime: {uptime['formatted']}",
         "",
-        f"CPU: {cpu['usage_percent']}% | {cpu['count_logical']} cores ({cpu['count_physical']} physical)",
+        f"CPU: {cpu['model']}",
+        f"Usage: {cpu['usage_percent']}% | {cpu['count_logical']} cores ({cpu['count_physical']} physical)",
         f"Load: {cpu['load_average']['1min']} / {cpu['load_average']['5min']} / {cpu['load_average']['15min']} (1/5/15min)",
         "",
         f"Memory: {mem['used_gb']}/{mem['total_gb']} GB ({mem['percent']}%)",
