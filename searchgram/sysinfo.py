@@ -11,9 +11,48 @@ from datetime import timedelta
 from typing import Dict, Any, Optional
 
 
+def get_arm_cpu_name(cpu_part: str) -> str:
+    """
+    Map ARM CPU part numbers to human-readable names.
+
+    Args:
+        cpu_part: CPU part number (e.g., '0xd05')
+
+    Returns:
+        CPU core name or the part number if unknown
+    """
+    arm_cpu_map = {
+        '0xd03': 'Cortex-A53',
+        '0xd04': 'Cortex-A35',
+        '0xd05': 'Cortex-A55',
+        '0xd07': 'Cortex-A57',
+        '0xd08': 'Cortex-A72',
+        '0xd09': 'Cortex-A73',
+        '0xd0a': 'Cortex-A75',
+        '0xd0b': 'Cortex-A76',
+        '0xd0c': 'Neoverse N1',
+        '0xd0d': 'Cortex-A77',
+        '0xd0e': 'Cortex-A76AE',
+        '0xd40': 'Neoverse V1',
+        '0xd41': 'Cortex-A78',
+        '0xd42': 'Cortex-A78AE',
+        '0xd44': 'Cortex-X1',
+        '0xd46': 'Cortex-A510',
+        '0xd47': 'Cortex-A710',
+        '0xd48': 'Cortex-X2',
+        '0xd49': 'Neoverse N2',
+        '0xd4a': 'Neoverse E1',
+        '0xd4b': 'Cortex-A78C',
+        '0xd4c': 'Cortex-X1C',
+        '0xd4d': 'Cortex-A715',
+        '0xd4e': 'Cortex-X3',
+    }
+    return arm_cpu_map.get(cpu_part.lower(), cpu_part)
+
+
 def get_cpu_model() -> str:
     """
-    Get CPU model name from /proc/cpuinfo on Linux.
+    Get CPU model name from /proc/cpuinfo on Linux (supports x86/x64 and ARM).
     Falls back to platform.processor() on other systems.
 
     Returns:
@@ -21,12 +60,72 @@ def get_cpu_model() -> str:
     """
     try:
         # Try Linux /proc/cpuinfo first
+        # Different architectures use different field names:
+        # - x86/x64: "model name"
+        # - ARM: Need to parse CPU implementer/part and check device tree
+        cpu_info = {}
+        cpu_parts = []  # Store all CPU part numbers for ARM big.LITTLE configs
+
         with open('/proc/cpuinfo', 'r') as f:
             for line in f:
-                if line.strip().startswith('model name'):
-                    # Extract model name after the colon
-                    model = line.split(':', 1)[1].strip()
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+
+                    # Store first occurrence of each field
+                    if key not in cpu_info:
+                        cpu_info[key] = value
+
+                    # Collect all CPU part numbers for ARM
+                    if key == 'cpu part':
+                        if value not in cpu_parts:
+                            cpu_parts.append(value)
+
+        # 1. x86/x64: "model name" (e.g., "Intel(R) Xeon(R) CPU E5-2670 v3 @ 2.30GHz")
+        if 'model name' in cpu_info and cpu_info['model name']:
+            return cpu_info['model name']
+
+        # 2. ARM: Try device tree model first (most accurate for SBC/embedded)
+        try:
+            with open('/sys/firmware/devicetree/base/model', 'r') as f:
+                model = f.read().strip('\x00').strip()
+                if model:
                     return model
+        except (FileNotFoundError, IOError):
+            pass
+
+        # 3. ARM: "Hardware" field (e.g., "BCM2835" on older Raspberry Pi)
+        if 'hardware' in cpu_info and cpu_info['hardware']:
+            hardware = cpu_info['hardware']
+            # Combine with Model if available for more detail
+            if 'model' in cpu_info and cpu_info['model']:
+                return f"{cpu_info['model']} ({hardware})"
+            return hardware
+
+        # 4. ARM: "Model" field (e.g., "Raspberry Pi 4 Model B Rev 1.2")
+        if 'model' in cpu_info and cpu_info['model']:
+            return cpu_info['model']
+
+        # 5. ARM: Parse CPU implementer and part numbers
+        if cpu_parts and 'cpu implementer' in cpu_info:
+            implementer = cpu_info['cpu implementer']
+
+            # ARM Ltd implementer (0x41)
+            if implementer == '0x41':
+                # Map part numbers to names and handle big.LITTLE
+                cpu_names = [get_arm_cpu_name(part) for part in cpu_parts]
+                unique_names = []
+                for name in cpu_names:
+                    if name not in unique_names:
+                        unique_names.append(name)
+
+                if len(unique_names) == 1:
+                    return f"ARM {unique_names[0]}"
+                else:
+                    # big.LITTLE configuration
+                    return f"ARM {' + '.join(unique_names)}"
+
     except (FileNotFoundError, IOError):
         pass
 
