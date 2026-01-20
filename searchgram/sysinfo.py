@@ -86,14 +86,45 @@ def get_cpu_model() -> str:
         if 'model name' in cpu_info and cpu_info['model name']:
             return cpu_info['model name']
 
-        # 2. ARM: Try device tree model first (most accurate for SBC/embedded)
+        # 2. ARM: Try device tree model and compatible (most accurate for SBC/embedded)
+        dt_model = None
+        dt_soc = None
+
+        # Read model (e.g., "FriendlyElec NanoPi R6S")
         try:
             with open('/sys/firmware/devicetree/base/model', 'r') as f:
-                model = f.read().strip('\x00').strip()
-                if model:
-                    return model
+                dt_model = f.read().strip('\x00').strip()
         except (FileNotFoundError, IOError):
             pass
+
+        # Read compatible strings (e.g., "friendlyelec,nanopi-r6s\0rockchip,rk3588s\0")
+        try:
+            with open('/sys/firmware/devicetree/base/compatible', 'rb') as f:
+                compatible = f.read().decode('utf-8', errors='ignore')
+                # Split by null bytes and parse
+                parts = [s for s in compatible.split('\x00') if s]
+
+                # Look for SoC vendor strings (rockchip, amlogic, broadcom, etc.)
+                for part in parts:
+                    if ',' in part:
+                        vendor, model = part.split(',', 1)
+                        vendor_lower = vendor.lower()
+                        # Common SoC vendors
+                        if vendor_lower in ['rockchip', 'amlogic', 'broadcom', 'allwinner',
+                                           'mediatek', 'qualcomm', 'samsung', 'nvidia']:
+                            # Capitalize vendor and uppercase model
+                            dt_soc = f"{vendor.capitalize()} {model.upper()}"
+                            break
+        except (FileNotFoundError, IOError, UnicodeDecodeError):
+            pass
+
+        # Combine model and SoC info
+        if dt_model and dt_soc:
+            return f"{dt_model} ({dt_soc})"
+        elif dt_model:
+            return dt_model
+        elif dt_soc:
+            return dt_soc
 
         # 3. ARM: "Hardware" field (e.g., "BCM2835" on older Raspberry Pi)
         if 'hardware' in cpu_info and cpu_info['hardware']:
