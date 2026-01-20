@@ -100,7 +100,7 @@ def init_mirror_api(
         logger.info("LLM not configured, LLM features will be disabled")
 
     # JWT auth is loaded by Flask app startup
-    from .jwt_utils import load_jwt_auth_from_config
+    from .jwt_auth import load_jwt_auth_from_config
     _jwt_auth = load_jwt_auth_from_config(issuer="bot")
 
     # Register mirror endpoints on the Flask app

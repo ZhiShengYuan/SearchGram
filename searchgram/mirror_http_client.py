@@ -8,7 +8,7 @@ Follows the same pattern as SyncHTTPClient and BotHTTPClient.
 import logging
 from typing import Dict, Any, Optional
 import httpx
-from .jwt_utils import load_jwt_auth_from_config
+from .jwt_auth import load_jwt_auth_from_config
 from .mirror_models import MirrorMessage
 
 logger = logging.getLogger(__name__)
